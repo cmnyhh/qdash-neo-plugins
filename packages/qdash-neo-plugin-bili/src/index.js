@@ -58,6 +58,14 @@ export function apply(ctx, config = {}) {
       chatKeys: Array.isArray(config?.chatKeys) ? config.chatKeys : [],
       /** 每次给几条候选 */
       limit: Number(config?.limit) > 0 ? Number(config.limit) : 6,
+      /**
+       * 想刷的方向。**留空就随便逛**。
+       *
+       * 每一项可以是**分区名**（游戏、科技…，见 `RIDS`），也可以是**关键词**
+       * （「太刀」「装机」）。每轮随机取一个，并避开上一轮用过的 ——
+       * 只配两三个方向时，纯随机很容易连着两次同一个。
+       */
+      topics: Array.isArray(config?.topics) ? config.topics : [],
     },
   })
 
@@ -118,11 +126,55 @@ export function apply(ctx, config = {}) {
     timer.unref?.()
   }
 
-  const hint = () => {
+  /**
+   * 这一轮往哪个方向逛。
+   *
+   * 配置了 `topics` 就随机取一个（避开上一轮），没配就返回空串 = 随便逛。
+   *
+   * **避开上一轮**：只配两三个方向时，纯随机有 1/3 概率连着两次同一个，
+   * 而用户看到的就是"它又发那个分区了"。
+   */
+  const pickTopic = () => {
+    const list = (conf.get().topics ?? []).map(s => String(s).trim()).filter(Boolean)
+    if (!list.length) return ''
+
+    const last = String(store.get('lastTopic') ?? '')
+    const pool = list.length > 1 ? list.filter(t => t !== last) : list
+    const pick = pool[Math.floor(Math.random() * pool.length)]
+
+    store.set('lastTopic', pick)
+    return pick
+  }
+
+  /**
+   * @param {string} topic 本轮方向（空 = 随便逛）
+   */
+  const hint = topic => {
     const list = `有分区榜：${Object.keys(bili.RIDS).slice(0, 12).join('、')}`
+
+    /**
+     * 方向可能是分区名，也可能是关键词 —— 用 `RIDS` 里有没有来区分。
+     *
+     * 不区分的话只能一律当关键词搜，而搜索**需要登录**；
+     * 没登录时那条路是断的，分区榜却不需要。
+     */
+    let focus = ''
+    if (topic) {
+      const rid = bili.RIDS[topic]
+      if (rid != null) {
+        focus = `这轮往「${topic}」这个分区看（bili_hot 带上 rid 传「${topic}」）。`
+      } else if (loggedIn()) {
+        focus = `这轮找找跟「${topic}」有关的东西（bili_find 用关键词「${topic}」）。`
+      } else {
+        // 没登录搜不了，退一步：提示它按这个方向在热门榜里挑
+        focus = `这轮重点看跟「${topic}」有关的，热门榜里挑也行。`
+      }
+    }
+
     return (
       '你去 B 站逛逛。' +
-      `用 bili_hot 看热门榜，想看某个分区就带上 rid（${list}）；` +
+      focus +
+      `没指定方向就用 bili_hot 看热门榜，想看某个分区就带上 rid（${list}）；` +
       (loggedIn() ? '想找具体的东西就用 bili_find 按关键词搜。' : '') +
       '看到真的有意思、值得跟群友聊的，就调 qq_send_card 发出去，' +
       '**再补一条 qq_send_message 说说你觉得哪里有意思** —— 卡片里只有标题和封面，正文读不到。' +
@@ -138,9 +190,16 @@ export function apply(ctx, config = {}) {
         log('warn', 'qdash-neo-plugin-bili: 没有可发的群（插件 chatKeys 与群白名单都为空），跳过本轮')
         return
       }
+      /**
+       * 方向**每轮只选一次，所有群共用**。
+       *
+       * 放在循环里各自随机会很怪：同一个时间点，几个群收到的是完全不同的
+       * 方向，像几个人各刷各的；而它本来该是「它此刻在逛什么」。
+       */
+      const topic = pickTopic()
       for (const key of keys) {
         try {
-          await neo.openProactive(key, { hint: hint() })
+          await neo.openProactive(key, { hint: hint(topic) })
         } catch (err) {
           log('warn', `qdash-neo-plugin-bili: 唤起 ${key} 失败 msg=${err?.message}`)
         }
@@ -319,19 +378,35 @@ export function apply(ctx, config = {}) {
           },
           { path: 'minMinutes', label: '最短间隔（分钟）', type: 'number', value: conf.get().minMinutes },
           { path: 'maxMinutes', label: '最长间隔（分钟）', type: 'number', value: conf.get().maxMinutes },
+          {
+            path: 'topics',
+            label: '想刷的方向（留空 = 随便逛）',
+            type: 'string',
+            value: (conf.get().topics ?? []).join(','),
+            description:
+              '逗号分隔。**分区名**（游戏、科技、动画、搞笑…）走排行榜，' +
+              '**其它词**（太刀、装机、猫）当关键词搜 —— 搜索要登录。' +
+              '每轮随机取一个，尽量不连着重复。留空就让它自己看热门榜',
+          },
           { path: 'limit', label: '每次给几条候选', type: 'number', value: conf.get().limit },
         ],
         submit: {
           id: 'save',
           label: '保存设置',
           run: async ({ values }) => {
-            const keys = String(values.chatKeys ?? '')
-              .split(/[,，\s]+/)
-              .map(s => s.trim())
-              .filter(Boolean)
+            /** 逗号/空格/中文逗号都认 —— 用户手打的时候不会统一 */
+            const split = v =>
+              String(v ?? '')
+                .split(/[,，、\s]+/)
+                .map(s => s.trim())
+                .filter(Boolean)
+
+            const keys = split(values.chatKeys)
+            const topics = split(values.topics)
             conf.set({
               enabled: values.enabled === true,
               chatKeys: keys,
+              topics,
               minMinutes: Number(values.minMinutes) || 180,
               maxMinutes: Number(values.maxMinutes) || 480,
               limit: Number(values.limit) || 6,
