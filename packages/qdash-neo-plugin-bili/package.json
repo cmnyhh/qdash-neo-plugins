@@ -1,0 +1,26 @@
+{
+  "name": "@cmnyhh/qdash-neo-plugin-bili",
+  "version": "0.1.0",
+  "description": "定时让模型去逛 B 站，看到值得聊的就发卡片 + 一句评价",
+  "type": "module",
+  "main": "./src/index.js",
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1",
+    "@deepseek-ai/schemastery": ">=0.2.0",
+    "@cmnyhh/qdash-neo": ">=0.1.10"
+  },
+  "license": "MIT"
+}

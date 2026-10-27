@@ -1,0 +1,4 @@
+# `name` 必须和 package.json 的 name 一致，写错会加载失败且看不出原因（见 §0.2）。
+- insert:
+    - id: qdash-neo-plugin-bili
+      name: '@cmnyhh/qdash-neo-plugin-bili'
