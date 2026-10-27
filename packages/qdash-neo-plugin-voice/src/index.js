@@ -274,7 +274,12 @@ export function apply(ctx, config) {
               label: '协议',
               type: 'string',
               value: cur.protocol,
-              description: 'openai = /v1/audio/speech 兼容 / gpt-sovits = 原生 /tts / custom = 自己填模板',
+              options: [
+                { value: 'openai', label: 'openai —— /v1/audio/speech 兼容' },
+                { value: 'gpt-sovits', label: 'gpt-sovits —— 原生 /tts' },
+                { value: 'custom', label: 'custom —— 自己填请求体模板' },
+              ],
+              description: '切换后下面会只显示这个协议用得上的字段',
             },
             {
               path: 'endpoint',
@@ -294,62 +299,70 @@ export function apply(ctx, config) {
             // —— openai 协议用 ——
             {
               path: 'model',
-              label: '模型（openai）',
+              label: '模型',
               type: 'string',
               value: cur.model,
-              description: '`tts-1` / `tts-1-hd`，或服务商自己的模型名。**音色不在这里，是下面的 voice**',
+              when: { path: 'protocol', in: ['openai'] },
+              description: '如 `tts-1`，或服务商自己的模型名。**它是模型，不是音色**',
             },
             {
               path: 'voice',
-              label: '音色（openai）',
+              label: '音色',
               type: 'string',
               value: cur.voice,
-              description: 'alloy / echo / fable / onyx / nova / shimmer，或服务商自己的音色名',
+              when: { path: 'protocol', in: ['openai'] },
+              description: 'alloy / echo / fable …，或服务商自己的音色名',
             },
 
-            // —— gpt-sovits 协议用 ——
+            // —— gpt-sovits 协议用（音色由参考音频决定，所以这里没有 voice）——
             {
               path: 'refAudioPath',
-              label: '参考音频路径（gpt-sovits）',
+              label: '参考音频路径',
               type: 'string',
               value: cur.refAudioPath,
-              description: '服务器上的绝对路径，必须真实存在。**音色由它决定**，不是 voice',
+              when: { path: 'protocol', in: ['gpt-sovits'] },
+              description: '服务器上的绝对路径。**这个协议下音色由它决定**',
             },
             {
               path: 'promptText',
-              label: '参考音频说的内容（gpt-sovits）',
+              label: '参考音频说的内容',
               type: 'string',
               value: cur.promptText,
-              description: '必须与那段参考音频逐字一致，否则音色会飘',
+              when: { path: 'protocol', in: ['gpt-sovits'] },
+              description: '必须与那段音频逐字一致，否则音色会飘',
             },
             {
               path: 'promptLang',
-              label: '参考音频语言（gpt-sovits）',
+              label: '参考音频语言',
               type: 'string',
               value: cur.promptLang,
+              when: { path: 'protocol', in: ['gpt-sovits'] },
               description: 'zh / en / ja …',
             },
             {
               path: 'textLang',
-              label: '合成文本语言（gpt-sovits）',
+              label: '合成文本语言',
               type: 'string',
               value: cur.textLang,
+              when: { path: 'protocol', in: ['gpt-sovits'] },
               description: 'zh / en / ja …，指要合成的这段话是什么语言',
             },
             {
               path: 'speedFactor',
-              label: '语速（gpt-sovits）',
+              label: '语速',
               type: 'number',
               value: cur.speedFactor,
+              when: { path: 'protocol', in: ['gpt-sovits'] },
               description: '1 = 原速，>1 更快',
             },
 
             // —— custom 协议用 ——
             {
               path: 'bodyTemplate',
-              label: '请求体模板（custom）',
+              label: '请求体模板',
               type: 'string',
               value: cur.bodyTemplate,
+              when: { path: 'protocol', in: ['custom'] },
               description: 'JSON 字符串，`{{text}}` 会被替换成要合成的内容',
             },
 
