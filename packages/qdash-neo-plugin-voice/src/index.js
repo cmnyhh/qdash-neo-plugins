@@ -72,7 +72,16 @@ export const Config = Schema.object({
 
 export function apply(ctx, config) {
   const neo = ctx.qdashNeo
-  const log = typeof ctx.log === 'function' ? ctx.log : () => {}
+  /**
+   * **不能用 `ctx.log`。**
+   *
+   * cordis 的 `ctx.xxx` 只能访问 `inject` 里声明过的服务，`log` 也是服务之一。
+   * 没有声明时，**取属性那一刻**就抛 `cannot get property "log" without inject` ——
+   * 连 `typeof ctx.log` 都会触发，所以"先探测再用"这种写法也不安全。
+   *
+   * 直接用内核 service 实例上的 `log`：它是普通函数属性，不经过 cordis 的属性代理。
+   */
+  const log = typeof neo?.log === 'function' ? (...args) => neo.log(...args) : () => {}
 
   /**
    * 主框架版本不匹配时**直接退出并说明原因**。

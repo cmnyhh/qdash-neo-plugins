@@ -1,6 +1,6 @@
 {
   "name": "@cmnyhh/qdash-neo-plugin-voice",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "qdash-neo 的语音插件：把文字合成语音（TTS），发送交给主框架",
   "type": "module",
   "main": "./src/index.js",
