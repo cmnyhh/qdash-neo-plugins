@@ -12,7 +12,20 @@ import { TtsClient } from './tts.js'
  * 不装这个插件时主框架的语音功能照常可用（`qq_send_voice` 发语音库里现成的音频）。
  */
 
-export const name = 'qdash-neo-plugin-voice'
+export const name = '@cmnyhh/qdash-neo-plugin-voice'
+
+/**
+ * 存储 / 配置 / 来源标记的命名空间。
+ *
+ * **不能直接用 `name`**：内核要求 `^[a-z][a-z0-9_]{0,31}$`（小写字母开头，
+ * 只允许 a-z0-9_），而 `@cmnyhh/qdash-neo-plugin-voice` 里有 `@` 和 `/` ——
+ * `settings.register` / `storage.forFeature` / `outboxApi.forPlugin` 会全部拒掉，
+ * 而且报错是「插件名不合法」，看起来像写错了名字。
+ *
+ * 这个值是**用户可见**的：`tools.disabledPlugins` 里要填它，
+ * 控制台选项卡的「来自 xxx」也显示它。所以取短的那个。
+ */
+const NS = 'qdash-neo-plugin-voice'
 
 /** 只声明需要的能力：拿服务、注册工具 */
 export const inject = ['qdashNeo']
@@ -85,7 +98,7 @@ export function apply(ctx, config) {
    * 这样"改个 endpoint 要重启宿主"就不存在了。
    */
   const conf = neo.settings.register({
-    plugin: name,
+    plugin: NS,
     key: 'tts',
     defaults: config?.tts ?? {},
   })
@@ -103,7 +116,7 @@ export function apply(ctx, config) {
   if (tts.enabled) {
     neo.tools.register({
       name: 'qq_speak',
-      owner: name,
+      owner: NS,
       description:
         '把一句话合成成语音发到当前会话。**语音是"语气比字面更重要"时才用的东西**：' +
         '一两句就说完、情绪明显、或者懒得打字。说正事、内容偏长、群里人多的时候，' +
@@ -153,7 +166,7 @@ export function apply(ctx, config) {
       id: 'voice',
       title: '语音库',
       order: 50,
-      owner: name,
+      owner: NS,
       layout: [
         {
           type: 'status',

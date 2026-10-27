@@ -11,7 +11,7 @@ qdash-neo 的**语音插件**：把一句话合成成语音。
 ## 装
 
 ```bash
-npm i qdash-neo-plugin-voice
+npm i @cmnyhh/qdash-neo-plugin-voice
 ```
 
 然后在 profile 的 `cordis.patch.yml` 里加上它的 patch：
@@ -19,7 +19,7 @@ npm i qdash-neo-plugin-voice
 ```yaml
 - insert:
     - id: qq-voice
-      name: 'qdash-neo-plugin-voice'
+      name: '@cmnyhh/qdash-neo-plugin-voice'
       config:
         tts:
           enabled: true

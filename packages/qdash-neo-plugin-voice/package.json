@@ -1,5 +1,5 @@
 {
-  "name": "qdash-neo-plugin-voice",
+  "name": "@cmnyhh/qdash-neo-plugin-voice",
   "version": "0.1.0",
   "description": "qdash-neo 的语音插件：把文字合成语音（TTS），发送交给主框架",
   "type": "module",
@@ -18,9 +18,9 @@
     "test": "node --test test/"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/schemastery": "^0.2.0",
-    "qdash-neo": "^0.1.0"
+    "@deepseek-ai/cordis": ">=4.0.1",
+    "@deepseek-ai/schemastery": ">=0.2.0",
+    "@cmnyhh/qdash-neo": ">=0.1.0"
   },
   "license": "MIT"
 }

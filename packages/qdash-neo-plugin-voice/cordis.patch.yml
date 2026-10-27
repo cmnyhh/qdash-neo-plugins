@@ -5,7 +5,8 @@
 # id 不存在时会被静默忽略（这个坑踩过一次，表现是"装了但没反应"）。
 - insert:
     - id: qq-voice
-      name: 'qdash-neo-plugin-voice'
+      # 必须与 package.json 的 name 完全一致（DSH 按它加载模块）
+      name: '@cmnyhh/qdash-neo-plugin-voice'
       config:
         # ⚠️ 这里的 `tts:` 只是**初始默认值**。
         #

@@ -9,7 +9,7 @@
 把文字合成语音（TTS）。三种接口形式、按内容与音色缓存、失败时降级为文字。
 
 ```bash
-npm i qdash-neo-plugin-voice
+npm i @cmnyhh/qdash-neo-plugin-voice
 ```
 
 它只负责产出一个音频文件——发送、路径校验、体积体检、频率限流、`[语音] xxx` 落库
