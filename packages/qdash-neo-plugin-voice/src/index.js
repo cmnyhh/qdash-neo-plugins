@@ -240,7 +240,15 @@ export function apply(ctx, config) {
             { label: '音频文件', value: `${files.length} 个`, tone: files.length ? 'ok' : 'warn' },
             {
               label: 'TTS',
-              value: s.tts.enabled ? `${s.tts.protocol}` : '未开启',
+              /**
+               * 三种状态要分开说，否则"勾了开关但没填地址"会显示成「未开启」，
+               * 用户以为是开关没生效，实际问题在缺配置。
+               */
+              value: s.tts.enabled
+                ? s.tts.protocol
+                : s.tts.missing?.length
+                  ? `未就绪（缺${s.tts.missing.join('、')}）`
+                  : '未开启',
               tone: s.tts.enabled ? 'ok' : 'warn',
             },
             { label: '合成缓存', value: `${s.tts.cachedFiles} 个` },
@@ -269,10 +277,11 @@ export function apply(ctx, config) {
             },
             {
               path: 'endpoint',
-              label: '接口地址',
+              label: '接口地址（必填）',
               type: 'string',
               value: cur.endpoint,
-              description: '如 http://127.0.0.1:9880/v1/audio/speech',
+              description:
+                '如 http://127.0.0.1:9880/v1/audio/speech。**只勾开关不填这里，工具不会注册** —— 调了必然失败，所以干脆不挂',
             },
             { path: 'format', label: '音频格式', type: 'string', value: cur.format },
             { path: 'maxChars', label: '单次字数上限', type: 'number', value: cur.maxChars },

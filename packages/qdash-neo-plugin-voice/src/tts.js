@@ -77,9 +77,18 @@ export class TtsClient {
     return this.conf.protocol
   }
 
-  /** 缓存目录（不存在则建） */
+  /**
+   * 缓存目录（不存在则建）。
+   *
+   * `dir` 由调用方给出，通常是 `storage.dir('tts')`（`<DSH_HOME>/qdash-plugins/tts`），
+   * **它就是缓存目录本身**，不要再拼 `.tts` —— 否则会多出一层
+   * `qdash-plugins/tts/.tts/`，而 `describe()` 数的是同一路径，表现是
+   * "合成完成但缓存条数一直显示 0"，看着像缓存没生效。
+   *
+   * `dir` 为空时才退回当前目录下的 `.tts`（旧版内核没有 `storage.dir`）。
+   */
   cacheDir() {
-    const d = join(this.dir || '.', '.tts')
+    const d = this.dir || '.tts'
     try {
       mkdirSync(d, { recursive: true })
     } catch (err) {
@@ -255,7 +264,7 @@ export class TtsClient {
   pruneCache() {
     const max = this.conf.cacheMaxFiles
     if (!(max > 0)) return
-    const dir = join(this.dir || '.', '.tts')
+    const dir = this.cacheDir()
     let entries
     try {
       entries = readdirSync(dir)
@@ -281,16 +290,35 @@ export class TtsClient {
     }
   }
 
+  /**
+   * 还缺哪些必填项（人话，直接给界面用）。
+   *
+   * `get enabled()` 是「开关 && 配了地址」，所以勾了开关却没填地址时它是 false。
+   * 界面若只显示"未开启"，用户会以为开关没生效 —— 实际是缺配置。
+   * 状态卡用这个说清缺什么。
+   *
+   * @returns {string[]} 空数组 = 配置完整
+   */
+  missingConfig() {
+    const lack = []
+    if (!this.conf.endpoint) lack.push('接口地址')
+    if (this.conf.protocol === 'gpt-sovits' && !this.conf.refAudioPath) {
+      lack.push('参考音频路径')
+    }
+    return lack
+  }
+
   /** 控制台/状态用 */
   describe() {
     let cachedFiles = 0
     try {
-      cachedFiles = readdirSync(join(this.dir || '.', '.tts')).length
+      cachedFiles = readdirSync(this.cacheDir()).length
     } catch {
       cachedFiles = 0
     }
     return {
       enabled: this.enabled,
+      missing: this.missingConfig(),
       protocol: this.conf.protocol,
       endpoint: this.conf.endpoint,
       format: this.conf.format,

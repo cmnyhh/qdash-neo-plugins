@@ -222,7 +222,7 @@ test('TTS：缓存超过上限按最旧删', async () => {
         }
       },
     )
-    assert.equal(readdirSync(join(dir, '.tts')).length, 2, '超出的要删掉')
+    assert.equal(readdirSync(dir).length, 2, '超出的要删掉：缓存直接落在 dir 里，没有 .tts 子层')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
