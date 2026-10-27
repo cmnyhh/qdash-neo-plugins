@@ -34,6 +34,7 @@ npm i qdash-neo-plugin-voice
 | `storage.forFeature()` | 键值存储（只给 KV，不给建表） |
 | `storage.dir()` | 插件自己的目录，跟着 `DSH_HOME` 走 |
 | `judgeApi.registerProvider()` | 在判定链里插一段自己的判定 |
+| `outboxApi.forPlugin(name)` | 发文本 / 图片（走主包队列，来源标记不可伪造） |
 | `voice.send()` | 发语音（走主包的完整检查链） |
 
 ## 许可

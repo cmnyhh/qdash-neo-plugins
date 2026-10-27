@@ -26,7 +26,8 @@
 | `storage.dir()` | ✅ | `<DSH_HOME>/qdash-plugins/<name>/` |
 | `judgeApi.registerProvider()` | ✅ | 判定链的插件段 |
 | `voice.send()` | ✅ | 发语音（路径、体积、限流、落库全在内核） |
-| `outbox.sendText()` / `sendSegments()` | ❌ | **发文本与图片没有入口** |
+| `outboxApi.forPlugin(name).sendText()` | ✅ | 走内核队列，来源标记不可伪造 |
+| `outboxApi.forPlugin(name).sendSegments()` | ✅ | 同上（图片 / 语音 / 表情） |
 | `outbox.onSendVoice()` | ❌ | 出站钩子未实现 |
 | `ctx.qdashNeo.on(...)` 事件 | ❌ | 未实现 |
 | `capabilities` 声明校验 | ❌ | 机制不存在，写了也不校验 |
@@ -295,25 +296,40 @@ const sub = ctx.qdashNeo.storage.dir('voice', 'mp3')
 2. 键名不能含 `%`（`kvList` 走 LIKE，`%` 会破坏前缀匹配）
 3. 子目录不允许 `/` 和 `..`
 
-### 2.3 outbox — 发消息
+### 2.3 outbox — 发消息（已实现）
 
-**部分实现。目前只有语音走通了，文本与图片还没有入口。**
+**先取句柄，再发。**
 
 ```js
-// ✅ 可用
-await ctx.qdashNeo.voice.send({ chatKey, file, label, trusted: true })
+const out = ctx.qdashNeo.outboxApi.forPlugin('todo')
 
-// ❌ 未实现（文档早期设计，代码里没有）
-ctx.qdashNeo.outbox.sendText(...)
-ctx.qdashNeo.outbox.sendSegments(...)
-ctx.qdashNeo.outbox.onSendVoice(...)
+await out.sendText({ chatKey, text: '该喝水了' })
+
+await out.sendSegments({
+  chatKey,
+  segments: [{ type: 'image', data: { file: '/abs/path/a.png' } }],
+  text: '[图片] 今天的报表',      // 给人看的标签，写进 messages 与控制台
+})
 ```
 
-**这是一处真实缺口**：想做「定时提醒发一条文字」这类插件，现在发不出去。
-补法是在 `service` 上加一个 `outbox` 门面，把已有的 `enqueueOut` / `enqueueSegmentsOut`
-暴露出去（它们已经做了分条、限流、落库与死信）。**要补的话它应该是下一个能力面。**
+**为什么是 `forPlugin(name)` 而不是 `sendText({ plugin: 'x' })`**：
+来源标记必须**不可伪造**。审计里要能分清「这条是模型发的还是插件发的」，
+如果由调用方自己传名字，插件可以冒充内核工具，出事时查不到是谁发的。
+和 `storage.forFeature(name)` 是同一个思路。
 
-**必须走内核队列**，不许直接调 OneBot HTTP。绕过队列等于绕过限流、分条、死信与审计。
+标记会以 `plugin:<名字>` 落进 `messages` 的 `meta`，控制台里一眼能看出。
+
+**走的是和模型完全相同的队列**：
+
+- 分条（`outbound.split`）
+- 每会话间隔（`perChatIntervalMs`，默认 1200ms）
+- 死信重试（3 次）
+- 落库（`messages` 表，控制台可见）
+
+**插件绕不过去，也不该绕**：直接调 OneBot HTTP 等于绕开限流、死信与审计，
+而且控制台里会看不到它发过什么。
+
+`onSendVoice`（出站钩子）仍未实现，见 §0.1。
 
 ### 2.4 console — 选项卡（详见 §5）
 
