@@ -42,6 +42,74 @@
 这张表每加一个能力就要改一次。**文档写了"有"而代码没有，比不写更糟** ——
 接手的人会照着写插件，然后花半天排查"为什么这个方法不存在"。
 
+## 0.2 装进 DSH 才会暴露的四个坑
+
+**本地跑测试、用 `--patch` 启动，这四个都测不出来。** 它们要么只在 cordis 的属性代理里存在，
+要么只在浏览器里生效。照着下面写，能省掉一轮"装上去报错、看不出为什么"。
+
+### 1. `ctx.xxx` 只能访问 `inject` 里声明过的服务
+
+`log` 也是服务之一。没有声明时，**取属性那一刻**就抛错：
+
+```js
+export const inject = ['qdashNeo']
+
+export function apply(ctx, config) {
+  const neo = ctx.qdashNeo
+
+  // ❌ cannot get property "log" without inject
+  //    注意：`typeof ctx.log` 这个求值本身就会抛，
+  //    "先探测再用"这种写法在 cordis 里不安全
+  const log = typeof ctx.log === 'function' ? ctx.log : () => {}
+
+  // ✅ 用内核实例上的方法（普通函数属性，不经过属性代理）
+  const log = typeof neo?.log === 'function' ? (...args) => neo.log(...args) : () => {}
+}
+```
+
+想要 `ctx.log` 也能用，就把它写进 `inject: ['qdashNeo', 'log']` —— 但那就依赖 DSH 的服务名，
+换个宿主版本可能变。**借内核实例上的方法更稳。**
+
+### 2. 控制台页面不能有内联 `<style>` / `<script>`
+
+CSP 是 `script-src 'self'; style-src 'self'`，内联的会被浏览器**直接拒绝**：
+
+| 现象 | 服务端表现 |
+|---|---|
+| 页面没有任何样式，只剩浏览器默认排版 | 200，日志正常 |
+| 按钮点了没反应 | 200，日志正常 |
+
+只有浏览器控制台有一条 CSP 违规。从后端完全看不出问题。
+
+**插件不要自己拼 HTML**：用 `registerTab` 的声明式四块（`status` / `table` / `form` / `actions`），
+内核渲染，天然不受 CSP 影响。`form` 块带 `submit` 就能编辑，覆盖了绝大多数配置需求。
+
+### 3. 插件名不能直接用包名
+
+包名是 `@scope/name`，而存储、配置、来源标记的命名空间要求 `^[a-z][a-z0-9_]{0,31}$`。
+`settings.register` / `storage.forFeature` / `outboxApi.forPlugin` 会全部拒掉，报错是
+「插件名不合法」，看起来像名字打错了。
+
+所以插件里通常有两个名字：
+
+```js
+export const name = '@cmnyhh/qdash-neo-plugin-voice'   // DSH 模块名 = 包名，必须与 package.json 一致
+const NS = 'qdash-neo-plugin-voice'                     // 存储/配置/来源标记用这个
+```
+
+`NS` 是用户可见的（`tools.disabledPlugins` 里要填它），所以取短的那个。
+
+### 4. `cordis.patch.yml` 的 `name` 必须等于 `package.json` 的 `name`
+
+改包名时最容易漏这一处。漏了之后装上去报：
+
+```
+qdash-neo (qdash-neo): failed to import:
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'qdash-neo' imported from profiles/web/
+```
+
+日志里那句话看着像"依赖没装"，实际是 patch 指错了模块名 —— 而 `node_modules` 里明明有。
+
 ## 1. 插件的形状
 
 ```
