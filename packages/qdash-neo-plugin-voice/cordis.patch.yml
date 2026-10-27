@@ -1,4 +1,4 @@
-# 语音插件。形态见 docs/qdash-neo/04-插件开发规范.md §1.2：
+# 语音插件。形态见本仓库的 docs/plugin-development.md §1.2：
 # 由 `package.json` 的 `dsh.bundle.patch` 指向，装进 profile 后由 DSH 展开。
 #
 # 注意 `insert:` 是必需的 —— 直接写 `- id: xxx` 是"按 id 修改已有条目"，
@@ -7,8 +7,15 @@
     - id: qq-voice
       name: 'qdash-neo-plugin-voice'
       config:
+        # ⚠️ 这里的 `tts:` 只是**初始默认值**。
+        #
+        # 装好之后在控制台「语音库」选项卡里改，保存即生效、**不用重启宿主**，
+        # 而且那份配置优先于这里。这整段留在文件里只为了一件事：
+        # 重装或换机器时，一份就能抄回去，不用重新点一遍。
+        #
+        # 想恢复默认：在控制台把值改回去，或清掉 kv 里 `cfg:qdash-neo-plugin-voice:tts`。
         tts:
-          # 默认关。配好下面的 endpoint 再改成 true。
+          # 默认关。配好 endpoint 再改成 true（也可以装完之后在控制台打开）。
           enabled: false
 
           # ── 三种协议选一种 ──────────────────────────────────────────
