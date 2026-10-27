@@ -1,0 +1,7 @@
+# 装进 DSH 时由 `dsh plugin add` 读这个文件。
+#
+# `name` 必须和 `package.json` 的 `name` 一致 —— 写成别的会加载失败，
+# 且报错只说"找不到插件"，看不出是这里写错了（详见 §0.2 第 4 条）。
+- insert:
+    - id: qdash-neo-plugin-sticker
+      name: '@cmnyhh/qdash-neo-plugin-sticker'
