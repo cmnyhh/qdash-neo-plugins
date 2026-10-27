@@ -20,7 +20,7 @@
 |---|---|---|
 | `inject: ['qdashNeo']` | ✅ | 拿到的是内核 service 实例 |
 | `console.registerTab()` | ✅ | 声明式四块（status / table / form / actions） |
-| `tools.register()` | ✅ | 会话建立时挂载；与内核同名时内核赢 |
+| `tools.register()` | ✅ | 注册即授予；同时补挂到已有会话；与内核同名时内核赢 |
 | `settings.register()` | ✅ | 运行时配置，命名空间 `cfg:<plugin>:<key>` |
 | `storage.forFeature()` | ✅ | **KV only**，不支持建表 |
 | `storage.dir()` | ✅ | `<DSH_HOME>/qdash-plugins/<name>/` |
@@ -422,30 +422,64 @@ const off = ctx.qdashNeo.voice.onSendVoice(({ chatKey, file, label }) => {
 
 ### 2.4 console — 选项卡（详见 §5）
 
-### 2.5 tools — 给 agent 供工具
+### 2.5 tools — 给 agent 供工具（已实现）
 
-```ts
-ctx.qdashNeo.tools.register(defineTool({ ... }))
+```js
+ctx.qdashNeo.tools.register({
+  name: 'qq_speak',
+  owner: 'qdash_neo_voice',        // 存储/禁用都按这个名字认，取短的
+  description: '把一句话合成成语音发到当前会话',
+  params: { text: '要合成成语音的文字，尽量短' },
+  async execute(args, exec) {
+    // exec.chatKey 是内核注入的会话标识；插件不自己解析
+    return { ok: true }
+  },
+})
 ```
 
-注册**不等于授予**：工具会进控制台的工具目录，默认状态「未授予」，要用户在控制台勾选才进会话工具集。这条与旧方案 §5.6 一致。
+**注册即授予**：注册后立刻并进该会话的 `allow` 白名单，模型就能调 —— 不需要用户在控制台逐项勾选。
 
-**但 §5.6 的粒度假设要修正**（对照 `@snowluma/mcp` 源码后）：
+> 早期设计稿写的是"默认未授予、控制台勾选后才进会话"。那个机制**没实现**，
+> 现在也不需要：控制台只有**按插件整体开关**。
 
-旧方案举例的工具 id 是 `snowluma/send_group_msg`，而真实的 `@snowluma/mcp` 只暴露 6 个 **meta 工具**（`list_actions` / `get_action` / `search_actions` / `list_categories` + `query_action` / `invoke_action`）。授予 `invoke_action` = 授予全部 OneBot action（发消息、踢人、改群、发文件）。**按工具粒度授权在这种形态下形同虚设。**
+控制台「工具」页会列出所有插件工具，每个插件一个「禁用 / 启用」按钮
+（落 `tools.disabledPlugins`）：
 
-因此工具目录必须区分两类条目：
+- 粒度是**整个插件**，不是单个工具。内核不知道"摘掉这一个，那个插件还能不能正常工作"，
+  那个判断只有插件自己知道
+- 禁用后**立刻**从已有会话摘掉，不用等新会话
+- 新注册的工具也会**立刻**补挂到已有会话
 
-| 类型 | 身份 | 授权粒度 | 例子 |
-|---|---|---|---|
-| 具名工具 | `name` 直接就是能力边界 | 工具名即可 | `host/Bash`、`feature:voice/tts_speak`、我们自己 `ctx.tools.register` 的工具 |
-| **meta 工具** | 一个工具背后是开放集合 | **必须下沉到参数级**（工具 + 允许的 action/子命令列表） | `snowluma/invoke_action`、`host/Bash` 的某些用法 |
+#### 注册与可用性必须分开
 
-规则：
-1. 目录里 meta 工具要带 `meta: true` 标记和 `enumerate()`（枚举它背后的可选项），控制台展开成二级勾选
-2. **meta 工具默认不授予**，且授予时必须逐项勾选子项，不能"全选"
-3. 风险标签对 meta 工具取**其子项的最高危等级**（`invoke_action` 一律按「执行 + 写入」算）
-4. **我们的内核出站不走 MCP**（见 02 §0），所以 QQ 发消息这条路径上不存在 meta 工具问题——它只影响"让 agent 自己操作 QQ"这类用法
+**注册是能力声明，不是可用性判断。** 插件装上就该注册；缺配置在 `execute` 里报。
+
+```js
+// ✅ 对：装上就注册，配置不齐在调用时给可行动的错误
+ctx.qdashNeo.tools.register({
+  name: 'qq_speak',
+  async execute() {
+    if (!tts.ready) {
+      throw new Error('TTS 还没配好（缺接口地址）。这次请改用别的方式；想用语音请去控制台补齐。')
+    }
+    // ...
+  },
+})
+
+// ❌ 错：按配置决定注不注册
+if (tts.enabled) {
+  ctx.qdashNeo.tools.register({ ... })
+}
+```
+
+按配置决定注不注册有三个坏处：
+
+1. 工具清单会**莫名其妙变长变短**（填了地址就出现、清空就消失），用户和模型都没法解释
+2. 模型**根本看不到**这个能力，连"改用别的方式"的依据都没有
+3. 日志里看不出"为什么没有这个工具"
+
+担心"挂一个必然报错的工具比没有更糟"是合理的，但那个担心成立的前提是
+**错误信息不可行动**。错误里写清缺什么、该怎么替代，模型就不会反复重试同一个工具。
 
 
 ### 2.6 judge — 判定器（已实现）
