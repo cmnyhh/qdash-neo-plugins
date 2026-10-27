@@ -68,9 +68,14 @@ export class TtsClient {
     return this
   }
 
-  /** 开了且配了地址才算可用 —— 只有 `enabled: true` 但没 endpoint 时，调它必然失败 */
+  /**
+   * 配置齐了才算能用。
+   *
+   * **这个值只影响"能不能合成"，不影响工具注册。** 工具装上就该一直存在，
+   * 否则模型那边会看到能力清单莫名其妙地变长变短 —— 而它没法解释这件事。
+   */
   get enabled() {
-    return this.conf.enabled && Boolean(this.conf.endpoint)
+    return this.missingConfig().length === 0
   }
 
   get protocol() {
@@ -291,16 +296,16 @@ export class TtsClient {
   }
 
   /**
-   * 还缺哪些必填项（人话，直接给界面用）。
+   * 还缺哪些必填项（人话，直接给界面和错误提示用）。
    *
-   * `get enabled()` 是「开关 && 配了地址」，所以勾了开关却没填地址时它是 false。
-   * 界面若只显示"未开启"，用户会以为开关没生效 —— 实际是缺配置。
-   * 状态卡用这个说清缺什么。
+   * 开关没开也算"缺"，因为对调用方来说两者都是"现在不能用"，
+   * 而需要用户做的事是同一件：去控制台「语音合成」补齐。
    *
    * @returns {string[]} 空数组 = 配置完整
    */
   missingConfig() {
     const lack = []
+    if (!this.conf.enabled) lack.push('TTS 开关')
     if (!this.conf.endpoint) lack.push('接口地址')
     if (this.conf.protocol === 'gpt-sovits' && !this.conf.refAudioPath) {
       lack.push('参考音频路径')

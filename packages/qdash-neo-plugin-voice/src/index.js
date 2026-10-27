@@ -142,63 +142,59 @@ export function apply(ctx, config) {
   /* ---------------- 工具 ---------------- */
 
   /**
-   * 按当前配置挂 / 摘 `qq_speak`。
+   * `qq_speak`：**装上就注册，不看配置**。
    *
-   * **TTS 没开启就不注册**：挂一个必然报错的工具比没有更糟 ——
-   * 模型会调一次、读错误、换个说法再调一次，一整轮就这么没了。
+   * 注册是「能力声明」—— 装了语音插件，这个 agent 就有「把文字合成成语音」这个能力。
+   * 配没配好是**运行时状态**，在 `execute` 里判，不该让工具从清单里消失。
    *
-   * **但也不能只在 apply 时判一次**：用户在面板里打开 TTS 之后工具要立刻可用，
-   * 关掉之后也要摘掉。所以这里是个可重复调用的同步函数，
-   * `save` 之后会再跑一遍（否则会表现为"开了 TTS 但工具清单里没有"）。
+   * 早先按 `tts.enabled` 决定注不注册，有三个坏处：
    *
-   * @type {(() => void)|null} 已注册时的注销函数
+   *   1. 工具清单会莫名其妙变长变短（填了地址就出现、清空就消失），没人能解释
+   *   2. 模型根本看不到这个能力，连「改用打字」的依据都没有
+   *   3. 日志里看不出「为什么没有这个工具」
+   *
+   * 我原先担心「挂一个必然报错的工具比没有更糟」—— 那个担心成立的前提是
+   * **错误信息不可行动**。现在错误里写清缺什么、该怎么替代，模型就不会反复重试。
    */
-  let disposeSpeak = null
+  try {
+    neo.tools.register({
+      name: 'qq_speak',
+      owner: NS,
+      description:
+        '把一句话合成成语音发到当前会话。**语音是"语气比字面更重要"时才用的东西**：' +
+        '一两句就说完、情绪明显、或者懒得打字。说正事、内容偏长、群里人多的时候，' +
+        '用 qq_send_message 打字更合适。文本不宜过长（合成慢且按量计费）。',
+      params: { text: '要合成成语音的文字，尽量短' },
+      async execute(args, exec) {
+        const text = String(args?.text ?? '').trim()
+        if (!text) throw new Error('text 不能为空')
+        const chatKey = String(exec?.chatKey ?? '').trim()
+        if (!chatKey) throw new Error('拿不到会话标识（主框架未注入 chatKey）')
 
-  const syncSpeak = () => {
-    const on = tts.enabled === true
+        /**
+         * 配置不齐在这里说清楚，**并给出替代方案**。
+         *
+         * 这段文案是给模型看的：它要据此决定「改说文字」还是「告诉用户去配」。
+         * 只说"TTS 未开启"的话模型只能猜，常见结果是反复重试同一个工具。
+         */
+        if (!tts.enabled) {
+          const lack = tts.missingConfig().join('、')
+          throw new Error(
+            `TTS 还没配好（缺${lack}）。这次请改用 qq_send_message 打字；` +
+              `如果用户确实想听语音，告诉他去控制台「语音合成」补齐这几项。`,
+          )
+        }
 
-    if (on && !disposeSpeak) {
-      try {
-        disposeSpeak = neo.tools.register({
-          name: 'qq_speak',
-          owner: NS,
-          description:
-            '把一句话合成成语音发到当前会话。**语音是"语气比字面更重要"时才用的东西**：' +
-            '一两句就说完、情绪明显、或者懒得打字。说正事、内容偏长、群里人多的时候，' +
-            '用 qq_send_message 打字更合适。文本不宜过长（合成慢且按量计费）。',
-          params: { text: '要合成成语音的文字，尽量短' },
-          async execute(args, exec) {
-            const text = String(args?.text ?? '').trim()
-            if (!text) throw new Error('text 不能为空')
-            const chatKey = String(exec?.chatKey ?? '').trim()
-            if (!chatKey) throw new Error('拿不到会话标识（主框架未注入 chatKey）')
-
-            // 只负责"造出文件"，发送与全部检查都交给主框架
-            const { file } = await tts.render(text)
-            await neo.voice.send({ chatKey, file, label: text, trusted: true })
-            return { ok: true, spoke: text }
-          },
-        })
-        log('info', 'qdash-neo-plugin-voice: 已注册工具 qq_speak（对新建会话生效）')
-      } catch (err) {
-        log('warn', `qdash-neo-plugin-voice: qq_speak 注册失败 msg=${err?.message}`)
-      }
-      return
-    }
-
-    if (!on && disposeSpeak) {
-      try {
-        disposeSpeak()
-      } catch {
-        /* 注销失败不该连带别的事 */
-      }
-      disposeSpeak = null
-      log('info', 'qdash-neo-plugin-voice: TTS 已关闭，qq_speak 已摘除')
-    }
+        // 只负责"造出文件"，发送与全部检查都交给主框架
+        const { file } = await tts.render(text)
+        await neo.voice.send({ chatKey, file, label: text, trusted: true })
+        return { ok: true, spoke: text }
+      },
+    })
+    log('info', 'qdash-neo-plugin-voice: 已注册工具 qq_speak')
+  } catch (err) {
+    log('warn', `qdash-neo-plugin-voice: qq_speak 注册失败 msg=${err?.message}`)
   }
-
-  syncSpeak()
 
   /* ---------------- 控制台选项卡 ---------------- */
 
@@ -246,9 +242,7 @@ export function apply(ctx, config) {
                */
               value: s.tts.enabled
                 ? s.tts.protocol
-                : s.tts.missing?.length
-                  ? `未就绪（缺${s.tts.missing.join('、')}）`
-                  : '未开启',
+                : `未就绪（缺${(s.tts.missing ?? []).join('、') || '配置'}）`,
               tone: s.tts.enabled ? 'ok' : 'warn',
             },
             { label: '合成缓存', value: `${s.tts.cachedFiles} 个` },
@@ -312,11 +306,9 @@ export function apply(ctx, config) {
                 }
                 try {
                   const next = conf.set(values)
-                  // 立刻生效：工具闭包里那个实例跟着换配置，不重建对象
+                  // 立刻生效：工具闭包里那个实例跟着换配置，不重建对象。
+                  // 工具不随配置挂/摘 —— 它装上就一直在，配置只影响 execute 能不能走通。
                   tts.applyConfig({ tts: next })
-                  // 开关变了要跟着挂/摘 qq_speak —— 否则面板里开了 TTS，
-                  // 工具清单里却一直没有它（下次重启才出现）
-                  syncSpeak()
                 } catch (err) {
                   return { ok: false, message: `保存失败：${err?.message ?? err}` }
                 }
