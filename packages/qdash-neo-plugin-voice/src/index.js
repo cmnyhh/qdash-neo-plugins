@@ -30,6 +30,19 @@ const NS = 'qdash-neo-plugin-voice'
 /** 只声明需要的能力：拿服务、注册工具 */
 export const inject = ['qdashNeo']
 
+/**
+ * 本插件用到的能力面。
+ *
+ * **当前不被校验** —— 内核拿不到插件的 manifest，`ctx.qdashNeo.capabilities`
+ * 也是一份只读清单（见规范 §2.8）。写在这里有两个用处：
+ *
+ *   1. 读代码的人一眼看到它依赖什么，不用翻全文
+ *   2. 将来真做安装期校验时，这份声明就是现成的
+ *
+ * 名字与内核 `capabilities` 的键一致。
+ */
+export const capabilities = ['tools', 'settings', 'storage', 'voice-send', 'console-tab']
+
 export const Config = Schema.object({
   tts: Schema.object({
     enabled: Schema.boolean().default(false).description('允许把文字合成语音（默认关）'),
@@ -112,7 +125,19 @@ export function apply(ctx, config) {
     defaults: config?.tts ?? {},
   })
 
-  const tts = new TtsClient({ tts: conf.get() }, { log, dir: neo.voice.dir?.() ?? '' })
+  /**
+   * 缓存目录走 `storage.dir()`，**不是**内核的语音库目录。
+   *
+   * 之前是 `voice.dir() + '.tts/'`，把插件的产物塞进内核的数据目录 ——
+   * 按边界说，语音库归主框架（用户往里放音频），插件缓存放进去会混在一起，
+   * 卸载插件时也不知道该清哪一份。
+   *
+   * 对旧版内核降级回 `voice.dir()`：那时还没有 `storage.dir`。
+   */
+  const cacheDir =
+    typeof neo.storage?.dir === 'function' ? neo.storage.dir('tts') : (neo.voice.dir?.() ?? '')
+
+  const tts = new TtsClient({ tts: conf.get() }, { log, dir: cacheDir })
 
   /* ---------------- 工具 ---------------- */
 
