@@ -284,6 +284,14 @@ export function apply(ctx, config) {
               description:
                 '如 http://127.0.0.1:9880/v1/audio/speech。**只勾开关不填这里，工具不会注册** —— 调了必然失败，所以干脆不挂',
             },
+            {
+              path: 'apiKey',
+              label: '接口密钥',
+              type: 'password',
+              value: cur.apiKey,
+              description:
+                'openai 协议下发 `Authorization: Bearer <密钥>`；服务不需要鉴权就留空',
+            },
             { path: 'format', label: '音频格式', type: 'string', value: cur.format },
             { path: 'maxChars', label: '单次字数上限', type: 'number', value: cur.maxChars },
             { path: 'voice', label: '音色（openai 协议）', type: 'string', value: cur.voice },
