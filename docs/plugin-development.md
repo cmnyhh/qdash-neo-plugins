@@ -754,7 +754,50 @@ actions: {
 
 **内核不解析 `values`**，只做透传和返回值包装。否则每加一个插件就要改一次内核的配置解析。
 
-三种控件：`string` → 文本框 / `number` → 数字框（空值转 0，避免 `NaN` 序列化成 `null`）/ `boolean` → 复选框。
+**控件类型**（按 `type` 选；带 `options` 时优先渲染下拉）：
+
+| 写法 | 渲染成 |
+|---|---|
+| `type: 'string'`（默认） | 文本框 |
+| `type: 'number'` | 数字框（空值转 0，避免 `NaN` 序列化成 `null`） |
+| `type: 'boolean'` | 复选框 |
+| `type: 'password'` | 密码框 |
+| `options: [{ value, label }]` | 下拉选择 |
+
+> `password` **不是安全措施**：值一样在 DOM 里，能打开控制台的就能看到。
+> 它只防误看、误截图。真正的边界是控制台要登录。
+
+#### 条件字段：`when`
+
+同一个插件常有多种模式（openai / gpt-sovits / custom），各自参数完全不同。
+全平铺出来，用户会看到一堆在他那个模式下**根本不生效**的框，而界面上没有任何
+东西告诉他哪几个是相关的。
+
+```js
+{
+  type: 'form',
+  fields: [
+    { path: 'protocol', label: '协议', options: [
+      { value: 'openai', label: 'openai' },
+      { value: 'gpt-sovits', label: 'gpt-sovits' },
+    ] },
+    { path: 'voice', label: '音色', when: { path: 'protocol', in: ['openai'] } },
+    { path: 'refAudioPath', label: '参考音频路径', when: { path: 'protocol', in: ['gpt-sovits'] } },
+  ],
+}
+```
+
+| 写法 | 何时显示 |
+|---|---|
+| `when: { path: 'x', in: ['a', 'b'] }` | `x` 的值是 `a` 或 `b` |
+| `when: { path: 'x', is: 'a' }` | `x` 的值等于 `a` |
+| 不写 `when` | 一直显示 |
+
+判断用**当前值**（用户刚改的优先），不是后端快照——所以切换下拉之后，
+字段组会立刻跟着变，不用先保存一次。
+
+**隐藏的字段不会被清空**：`settings.set` 是合并（`{ ...get(), ...patch }`），
+提交时只带可见字段，隐藏的保持原值。这条是"按条件隐藏"能安全成立的前提。
 
 **不带 `submit` 时维持只读展示**：有些 form 块本来就只是展示（比如内核自己的配置项），
 全变成输入框会让"哪些能改"变模糊。
