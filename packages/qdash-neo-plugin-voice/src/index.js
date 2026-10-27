@@ -281,26 +281,100 @@ export function apply(ctx, config) {
               label: '接口地址（必填）',
               type: 'string',
               value: cur.endpoint,
-              description:
-                '如 http://127.0.0.1:9880/v1/audio/speech。**只勾开关不填这里，工具不会注册** —— 调了必然失败，所以干脆不挂',
+              description: '如 http://127.0.0.1:9880/v1/audio/speech（openai）或 /tts（gpt-sovits）',
             },
             {
               path: 'apiKey',
               label: '接口密钥',
               type: 'password',
               value: cur.apiKey,
-              description:
-                'openai 协议下发 `Authorization: Bearer <密钥>`；服务不需要鉴权就留空',
+              description: 'openai 协议下发 `Authorization: Bearer <密钥>`；服务不需要鉴权就留空',
             },
-            { path: 'format', label: '音频格式', type: 'string', value: cur.format },
-            { path: 'maxChars', label: '单次字数上限', type: 'number', value: cur.maxChars },
-            { path: 'voice', label: '音色（openai 协议）', type: 'string', value: cur.voice },
+
+            // —— openai 协议用 ——
+            {
+              path: 'model',
+              label: '模型（openai）',
+              type: 'string',
+              value: cur.model,
+              description: '`tts-1` / `tts-1-hd`，或服务商自己的模型名。**音色不在这里，是下面的 voice**',
+            },
+            {
+              path: 'voice',
+              label: '音色（openai）',
+              type: 'string',
+              value: cur.voice,
+              description: 'alloy / echo / fable / onyx / nova / shimmer，或服务商自己的音色名',
+            },
+
+            // —— gpt-sovits 协议用 ——
             {
               path: 'refAudioPath',
-              label: '参考音频路径（gpt-sovits 协议）',
+              label: '参考音频路径（gpt-sovits）',
               type: 'string',
               value: cur.refAudioPath,
-              description: '服务器上的绝对路径，必须真实存在',
+              description: '服务器上的绝对路径，必须真实存在。**音色由它决定**，不是 voice',
+            },
+            {
+              path: 'promptText',
+              label: '参考音频说的内容（gpt-sovits）',
+              type: 'string',
+              value: cur.promptText,
+              description: '必须与那段参考音频逐字一致，否则音色会飘',
+            },
+            {
+              path: 'promptLang',
+              label: '参考音频语言（gpt-sovits）',
+              type: 'string',
+              value: cur.promptLang,
+              description: 'zh / en / ja …',
+            },
+            {
+              path: 'textLang',
+              label: '合成文本语言（gpt-sovits）',
+              type: 'string',
+              value: cur.textLang,
+              description: 'zh / en / ja …，指要合成的这段话是什么语言',
+            },
+            {
+              path: 'speedFactor',
+              label: '语速（gpt-sovits）',
+              type: 'number',
+              value: cur.speedFactor,
+              description: '1 = 原速，>1 更快',
+            },
+
+            // —— custom 协议用 ——
+            {
+              path: 'bodyTemplate',
+              label: '请求体模板（custom）',
+              type: 'string',
+              value: cur.bodyTemplate,
+              description: 'JSON 字符串，`{{text}}` 会被替换成要合成的内容',
+            },
+
+            // —— 通用 ——
+            {
+              path: 'format',
+              label: '音频格式',
+              type: 'string',
+              value: cur.format,
+              description: '要和**服务端实际返回**的一致（mp3 / wav / opus），否则会被音频体检拒掉',
+            },
+            { path: 'maxChars', label: '单次字数上限', type: 'number', value: cur.maxChars },
+            {
+              path: 'timeoutMs',
+              label: '超时（毫秒）',
+              type: 'number',
+              value: cur.timeoutMs,
+              description: '超时直接失败，不重试 —— 重试只会更慢',
+            },
+            {
+              path: 'cacheMaxFiles',
+              label: '缓存文件上限',
+              type: 'number',
+              value: cur.cacheMaxFiles,
+              description: '超出按最旧删除；0 = 不限制',
             },
           ],
           submit: { id: 'save', label: '保存' },

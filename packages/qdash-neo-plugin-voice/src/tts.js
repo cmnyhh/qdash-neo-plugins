@@ -54,8 +54,13 @@ export class TtsClient {
       format: String(t.format ?? 'mp3').trim() || 'mp3',
       cacheMaxFiles: Number(t.cacheMaxFiles) >= 0 ? Number(t.cacheMaxFiles) : 200,
 
-      model: String(t.model ?? 'tts-1').trim(),
-      voice: String(t.voice ?? 'alloy').trim(),
+      /**
+       * 用 `||` 而不是 `??`：在表单里把这两个框清空，存进来的是空字符串 `''`，
+       * 而 `??` 只在 null/undefined 时兜底 —— 结果是请求带上 `"model": ""`，
+       * 服务端报一个跟"模型名"看起来完全无关的错。
+       */
+      model: String(t.model ?? '').trim() || 'tts-1',
+      voice: String(t.voice ?? '').trim() || 'alloy',
 
       refAudioPath: String(t.refAudioPath ?? '').trim(),
       promptText: String(t.promptText ?? '').trim(),

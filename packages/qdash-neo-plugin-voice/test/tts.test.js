@@ -247,3 +247,13 @@ test('TTS：applyConfig 换配置立刻生效，不用重建实例', () => {
   c.applyConfig({ tts: { ...TTS_BASE, enabled: false } })
   assert.equal(c.enabled, false, '关掉之后 enabled 也要跟着变')
 })
+
+test('model/voice 清空后要回落到默认值，不能把空串发出去', () => {
+  const c = mkClient({ model: '', voice: '' })
+  assert.equal(c.conf.model, 'tts-1', '空串要用默认，`??` 做不到这一点')
+  assert.equal(c.conf.voice, 'alloy')
+
+  const body = c.buildRequest('x').body
+  assert.equal(body.model, 'tts-1')
+  assert.equal(body.voice, 'alloy')
+})
