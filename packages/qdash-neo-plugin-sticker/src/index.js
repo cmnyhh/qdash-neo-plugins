@@ -33,7 +33,14 @@ const RECENT_IMAGE_CAP = 200
  */
 export function apply(ctx, config = {}) {
   const neo = ctx.qdashNeo
-  const log = (...a) => ctx.log?.('info', ...a)
+  /**
+   * **不能用 `ctx.log`** —— 它要 `inject: ['log']` 才拿得到，
+   * 直接访问会抛 `cannot get property "log" without inject`，
+   * 而那个错误在插件加载期抛出，整个 `apply` 都不执行。
+   *
+   * 这就是 §0.2 第 1 条坑。`console.log` 一样进 journalctl。
+   */
+  const log = (...a) => console.log(...a)
 
   const cfg = {
     enabled: config?.enabled !== false,
@@ -59,7 +66,7 @@ export function apply(ctx, config = {}) {
     return
   }
 
-  const store = new StickerStore({ dir, maxFiles: cfg.maxFiles, log: ctx.log })
+  const store = new StickerStore({ dir, maxFiles: cfg.maxFiles, log })
 
   /**
    * `图片标识 → 下载地址`。
