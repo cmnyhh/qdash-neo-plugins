@@ -25,7 +25,7 @@ export const name = '@cmnyhh/qdash-neo-plugin-voice'
  * 这个值是**用户可见**的：`tools.disabledPlugins` 里要填它，
  * 控制台选项卡的「来自 xxx」也显示它。所以取短的那个。
  */
-const NS = 'qdash-neo-plugin-voice'
+const NS = 'qdash_neo_voice'
 
 /** 只声明需要的能力：拿服务、注册工具 */
 export const inject = ['qdashNeo']
