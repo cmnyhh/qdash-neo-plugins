@@ -1,0 +1,7 @@
+# 复制成 .npmrc 再填 token（.npmrc 已被 gitignore，不会进版本库）
+#
+# 全局 npm 若指向镜像（如 mirrors.cloud.tencent.com），必须在这里覆盖成官方源 ——
+# 镜像只读，发布时报的错是「需要登录 mirrors...」，看起来像凭据问题，实际是源不对。
+registry=https://registry.npmjs.org/
+//registry.npmjs.org/:_authToken=填你的token
+access=public
