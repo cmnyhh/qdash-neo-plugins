@@ -42,7 +42,7 @@
 这张表每加一个能力就要改一次。**文档写了"有"而代码没有，比不写更糟** ——
 接手的人会照着写插件，然后花半天排查"为什么这个方法不存在"。
 
-## 0.2 装进 DSH 才会暴露的四个坑
+## 0.2 装进 DSH 才会暴露的五个坑
 
 **本地跑测试、用 `--patch` 启动，这四个都测不出来。** 它们要么只在 cordis 的属性代理里存在，
 要么只在浏览器里生效。照着下面写，能省掉一轮"装上去报错、看不出为什么"。
@@ -112,6 +112,29 @@ Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'qdash-neo' imported from prof
 ```
 
 日志里那句话看着像"依赖没装"，实际是 patch 指错了模块名 —— 而 `node_modules` 里明明有。
+
+### 5. 注册必须挂到 `ctx.effect`，否则卸载后残留
+
+```js
+export function apply(ctx, config) {
+  // ✅ 登记了清理，DSH 停用/卸载插件时会调它
+  ctx.effect(() => neo.tools.register({ ... }))
+  ctx.effect(() => neo.console.registerTab({ ... }))
+
+  // ❌ dispose 只有你知道，没人会替你调
+  neo.tools.register({ ... })
+}
+```
+
+内核返回的 disposer **只有插件自己拿着**。DSH 停用或卸载插件时，cordis
+只跑 `ctx.effect` 登记过的清理 —— 没登记的注册会一直留在主包内存里，
+**直到主框架重启**。
+
+表现是「插件都删了，选项卡和工具还在」。而且这些残留还能被调用，
+因为它挂在主包的注册表上，跟插件是否还在无关。
+
+同一个 `ctx.effect` 里可以返回多个 disposer（返回数组或用 generator），
+但**每个注册都必须是某个 effect 的产物**。
 
 ## 1. 插件的形状
 

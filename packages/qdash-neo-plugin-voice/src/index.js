@@ -157,7 +157,7 @@ export function apply(ctx, config) {
    * **错误信息不可行动**。现在错误里写清缺什么、该怎么替代，模型就不会反复重试。
    */
   try {
-    neo.tools.register({
+    const disposeTool = neo.tools.register({
       name: 'qq_speak',
       owner: NS,
       description:
@@ -191,6 +191,13 @@ export function apply(ctx, config) {
         return { ok: true, spoke: text }
       },
     })
+    /**
+     * 同样登记到生命周期。
+     *
+     * 不登记的话，DSH 卸载插件后工具还挂在工具页上 ——
+     * 而插件已经不在了，用户没法解释"为什么这个工具还在"。
+     */
+    ctx.effect(() => disposeTool)
     log('info', 'qdash-neo-plugin-voice: 已注册工具 qq_speak')
   } catch (err) {
     log('warn', `qdash-neo-plugin-voice: qq_speak 注册失败 msg=${err?.message}`)
@@ -339,5 +346,23 @@ export function apply(ctx, config) {
     dispose = neo.console.registerTab(build())
   }
 
-  registry()
+  /**
+   * 挂到插件的生命周期上。
+   *
+   * **必须用 `ctx.effect`**：内核返回的 dispose 只有插件自己知道。
+   * DSH 停用/卸载插件时，cordis 只会跑 `ctx.effect` 登记过的清理 ——
+   * 不登记的话，选项卡会一直留在主包的内存里，直到主框架重启。
+   * 用户看到的就是「插件都删了，页面还在」。
+   */
+  ctx.effect(() => {
+    registry()
+    return () => {
+      try {
+        dispose?.()
+      } catch {
+        /* 注销失败不该连带别的事 */
+      }
+      dispose = null
+    }
+  })
 }
