@@ -171,6 +171,74 @@ export function apply(ctx, config) {
 同一个 `ctx.effect` 里可以返回多个 disposer（返回数组或用 generator），
 但**每个注册都必须是某个 effect 的产物**。
 
+## 0.3 自查清单（每次改完跑一遍）
+
+### 跑测试：必须写明文件
+
+```powershell
+# ✅
+node --test test/core.test.js test/service.test.js ...
+
+# ❌ 会把 _ref/qq-bridge/scripts/ 那个外部参考项目一起跑
+node --test
+```
+
+`_ref` 缺 `js-yaml`、缺 `playwright`、还连不上 3100 端口 —— **56 个失败全是它的**，
+真正的失败被埋在里面。这个仓库的 `npm test` 已经写明了文件清单，用它。
+
+### 重复声明会让整个测试文件静默消失
+
+```js
+function sendText(service, chatKey, text) { ... }   // L992
+function sendText(s, chatKey, text) { ... }         // L1025 ← 多余
+```
+
+```
+SyntaxError: Identifier 'sendText' has already been declared
+```
+
+**解析阶段就失败，文件里的 69 个用例一个都不跑**，而汇总行只显示
+"1 fail"（那个文件算 1 个）。看起来像"只有一个小问题"。
+
+**自查**：
+
+```js
+// 每个文件的顶层声明数一遍
+for (const m of t.matchAll(/^(?:export\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/gm)) ...
+```
+
+### 配置键：引用了但 schema 里没有
+
+最危险的一类拼错，因为它**不报错**：
+
+```js
+this.config?.polciy?.groupWhitelist     // 恒为 undefined
+→ 白名单永远空着，没有任何日志
+```
+
+**自查方法**：从 `config.js` 抠出 schema 字段路径，和代码里
+`config?.a?.b` 的引用比对，列出"引用了但没定义"的。
+
+注意误报：`conf.get().minMinutes` 是**插件自己的配置**，不是内核 `config`；
+`config.tools.grantedPlugins` 这种三级路径，用两级正则抓不到。
+
+### 全绿也可能链路是断的
+
+已经踩过三次，共同点是**每一环都显示成功**：
+
+| 断在哪 | 每一环的样子 |
+|---|---|
+| `instructions` 写 `AGENTS.md` | register ✓ / 控制台可见 ✓ / 文件正确 ✓ / **模型从没收到** |
+| `form.submit.run` 没注册 | 插件传了 ✓ / 校验通过 ✓ / 按钮渲染 ✓ / **点了没动作** |
+| `qq_send_card` 没进 catalog | 实现注册 ✓ / 工具可见 ✓ / **调用被 guard 拒** |
+
+**判据**：验证一个能力时，**不要只验证"注册成功"**，要验证"**最终使用者拿到没有**" ——
+模型有没有看到这段 prompt、按钮点下去有没有执行、工具调用有没有真的发出去。
+
+**测试断言也要这么写**：断言"注册表里有它"是没用的，要断言"渲染出来的 prompt 里有它"。
+
+---
+
 ## 1. 插件的形状
 
 ```
