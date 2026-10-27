@@ -661,12 +661,34 @@ const dispose = ctx.qdashNeo.instructions.register({
 ctx.effect(() => dispose)               // 和工具/选项卡一样，必须挂生命周期
 ```
 
-这段文字会拼进 `AGENTS.md` 的规则块，和内核的 `SEND_RULE` / `MEMORY_RULE` 并列，每段带来源标题：
+这段文字**直接拼进每一轮的 prompt**，每段带来源标题：
 
 ```
-【来自「sticker」插件的引导】
-看到群友发的图…
+【来自「sticker」插件】看到群友发的图…
 ```
+
+#### 重要更正（2026-10-27）
+
+**早期实现是把引导写进 `AGENTS.md`，那条路是死的 —— 引导从未到达模型。**
+
+`dsh-agent-instructions` 靠 `projectRootMarkers=[".git"]` 定位项目根，在数据目录
+（`~/.dsh/workspaces/qdash-neo`）里即使补了 `.git`，baseline 也没有进入会话记录
+（`isSeeded:false`、记录里零命中）—— 中间还有 preset 那一层，我们控制不到。
+
+后果很难发现，因为**每一环看起来都对**：
+
+- `register()` 成功 ✓
+- 控制台能看到全文、能授权 ✓
+- `AGENTS.md` 文件内容正确 ✓
+- 测试通过 ✓（测的是"注册表里有没有"，**没测"模型能不能看到"**）
+- **模型：从来没收到过** ✗
+
+同类问题被掩盖了：`SEND_RULE`（"把话放进 `qq_send_message`"）也写在那个文件里，
+但 `normalize.js` 的 `REPLY_HINT` 在 prompt 里有**另一份**，所以发送方式一直是对的 ——
+**只有插件引导没有 prompt 对应物，是唯一裸奔的**。
+
+现在 `renderPrompt` 收了 `pluginRules` 参数，service 每轮传入。**不要再往
+`AGENTS.md` 加东西**：写文件那半只是为了兼容旧路径保留的。
 
 #### 什么时候该用它，而不是塞进工具 description
 
@@ -711,11 +733,24 @@ ctx.qdashNeo.instructions.register({ key, text })   // 注册：控制台可见
 
 #### 生效时机
 
-- 注册时**立刻**重写 `AGENTS.md`
-- 但 DSH 的 agent 在**会话建立时**读一次 `AGENTS.md` → **已有会话不受影响**
-- 授权名单变更同理
+**当轮生效，不需要重建会话。**
 
-所以改完引导后，已有的 QQ 会话要等重建才看得到新内容。这条和 `agent.systemPrompt` 一样，属于当前架构的限制。
+引导拼进的是每一轮的 prompt（`renderPrompt` 的 `pluginRules` 参数），
+所以：
+
+| 动作 | 何时生效 |
+|---|---|
+| `register()` | 下一轮 |
+| 控制台点「允许」 | 下一轮 |
+| 改 `text` 后重新 `register` | 下一轮 |
+
+**这和早期设计不同**（那时写 `AGENTS.md`，要等会话重建）。如果你改完引导发现
+"模型行为没变"，先确认它真的进了 prompt —— 而不是怀疑自己写错了。
+
+#### 自检
+
+改完引导想确认生效，看任意一轮的 prompt 里有没有 `【来自「<你的 owner>」插件】`。
+没有就说明授权没点，或者 `grantedInstructions` 里没有你的 owner。
 
 ## 3. 钩子（唯一允许介入链路的地方）
 
