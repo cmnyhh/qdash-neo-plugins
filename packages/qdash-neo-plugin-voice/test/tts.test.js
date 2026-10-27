@@ -234,3 +234,16 @@ test('TTS：describe 暴露给控制台的信息齐全', () => {
   assert.equal(d.protocol, 'openai')
   assert.equal(typeof d.cachedFiles, 'number')
 })
+
+test('TTS：applyConfig 换配置立刻生效，不用重建实例', () => {
+  const c = mkClient({ endpoint: 'http://a/tts' })
+  assert.equal(c.conf.endpoint, 'http://a/tts')
+
+  // 设置页保存后走这条路：工具闭包里那个实例要跟着换，不能是旧的
+  c.applyConfig({ tts: { ...TTS_BASE, endpoint: 'http://b/tts' } })
+  assert.equal(c.conf.endpoint, 'http://b/tts', 'endpoint 要换掉')
+  assert.equal(c.enabled, true)
+
+  c.applyConfig({ tts: { ...TTS_BASE, enabled: false } })
+  assert.equal(c.enabled, false, '关掉之后 enabled 也要跟着变')
+})

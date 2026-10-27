@@ -78,7 +78,19 @@ export function apply(ctx, config) {
   }
 
   // 缓存目录跟主框架的语音库走：两边各推一遍规则，换 DSH_HOME 后必然一个写对一个写错
-  const tts = new TtsClient(config ?? {}, { log, dir: neo.voice.dir?.() ?? '' })
+  /**
+   * 配置走**运行层**（`settings.register`），不是 patch 的 `config`。
+   *
+   * patch 里的 `config.tts` 只作为默认值：用户在控制台改过之后以控制台那份为准。
+   * 这样"改个 endpoint 要重启宿主"就不存在了。
+   */
+  const conf = neo.settings.register({
+    plugin: name,
+    key: 'tts',
+    defaults: config?.tts ?? {},
+  })
+
+  const tts = new TtsClient({ tts: conf.get() }, { log, dir: neo.voice.dir?.() ?? '' })
 
   /* ---------------- 工具 ---------------- */
 
@@ -134,6 +146,8 @@ export function apply(ctx, config) {
     const s = snapshot()
     const v = s.voice
     const files = v?.files ?? []
+    /** 当前生效的配置（含用户在控制台改过的） */
+    const cur = conf.get()
 
     return {
       id: 'voice',
@@ -167,18 +181,61 @@ export function apply(ctx, config) {
         },
         {
           type: 'form',
-          title: 'TTS 配置（只读，改在插件的 cordis.patch.yml 里）',
+          title: 'TTS 配置（改完点保存，立即生效）',
           fields: [
-            { path: 'tts.enabled', label: 'TTS 开关', type: 'string', value: s.tts.enabled ? '开' : '关' },
-            { path: 'tts.protocol', label: '协议', type: 'string', value: s.tts.protocol },
-            { path: 'tts.endpoint', label: '接口地址', type: 'string', value: s.tts.endpoint || '(未配置)' },
-            { path: 'tts.format', label: '音频格式', type: 'string', value: s.tts.format },
-            { path: 'tts.maxChars', label: '单次字数上限', type: 'string', value: String(s.tts.maxChars) },
+            { path: 'enabled', label: 'TTS 开关', type: 'boolean', value: cur.enabled === true },
+            {
+              path: 'protocol',
+              label: '协议',
+              type: 'string',
+              value: cur.protocol,
+              description: 'openai = /v1/audio/speech 兼容 / gpt-sovits = 原生 /tts / custom = 自己填模板',
+            },
+            {
+              path: 'endpoint',
+              label: '接口地址',
+              type: 'string',
+              value: cur.endpoint,
+              description: '如 http://127.0.0.1:9880/v1/audio/speech',
+            },
+            { path: 'format', label: '音频格式', type: 'string', value: cur.format },
+            { path: 'maxChars', label: '单次字数上限', type: 'number', value: cur.maxChars },
+            { path: 'voice', label: '音色（openai 协议）', type: 'string', value: cur.voice },
+            {
+              path: 'refAudioPath',
+              label: '参考音频路径（gpt-sovits 协议）',
+              type: 'string',
+              value: cur.refAudioPath,
+              description: '服务器上的绝对路径，必须真实存在',
+            },
           ],
+          submit: { id: 'save', label: '保存' },
         },
         {
           type: 'actions',
           actions: [
+            {
+              id: 'save',
+              label: '保存配置',
+              /**
+               * `values` 是表单按 `path` 收上来的对象（`{ enabled: true, endpoint: '...' }`）。
+               * 内核只透传，不解析 —— 插件的配置结构插件自己知道。
+               */
+              run: async ({ values } = {}) => {
+                if (!values || typeof values !== 'object') {
+                  return { ok: false, message: '没有收到字段值' }
+                }
+                try {
+                  const next = conf.set(values)
+                  // 立刻生效：工具闭包里那个实例跟着换配置，不重建对象
+                  tts.applyConfig({ tts: next })
+                } catch (err) {
+                  return { ok: false, message: `保存失败：${err?.message ?? err}` }
+                }
+                registry()
+                return { ok: true, message: '已保存，立即生效' }
+              },
+            },
             {
               id: 'refresh',
               label: '刷新列表',

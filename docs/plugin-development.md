@@ -534,6 +534,44 @@ const dispose = ctx.qdashNeo.console.registerTab({
 
 #### form — 配置表单
 
+**块上带 `submit` 就是可编辑的，不带就只读。**
+
+```js
+{
+  type: 'form',
+  title: 'TTS 配置',
+  fields: [
+    { path: 'endpoint', label: '接口地址', type: 'string', value: 'http://127.0.0.1:9880/...' },
+    { path: 'enabled', label: '开启', type: 'boolean', value: true },
+    { path: 'maxChars', label: '字数上限', type: 'number', value: 200 },
+  ],
+  submit: { id: 'save', label: '保存' },     // ← 有它才渲染输入控件
+}
+```
+
+点保存时，内核把所有字段按 `path` 收成 `{ [path]: value }`，
+POST 到 `/api/tabs/<tabId>/actions/<submit.id>`，body 是 `{ values }`。
+插件自己处理：
+
+```js
+actions: {
+  save: async ({ values }) => {
+    conf.set(values)              // conf = settings.register(...)
+    return { ok: true, message: '已保存，立即生效' }
+  },
+}
+```
+
+**内核不解析 `values`**，只做透传和返回值包装。否则每加一个插件就要改一次内核的配置解析。
+
+三种控件：`string` → 文本框 / `number` → 数字框（空值转 0，避免 `NaN` 序列化成 `null`）/ `boolean` → 复选框。
+
+**不带 `submit` 时维持只读展示**：有些 form 块本来就只是展示（比如内核自己的配置项），
+全变成输入框会让"哪些能改"变模糊。
+
+> 早期这里是硬性只读的，注释写着"settings.register 还没接，假装可编辑而后端不接收，
+> 比不可编辑更糟"。那个前提现在已经不成立 —— `settings.register` 与 `tabAction` 都通了。
+
 ```ts
 {
   type: 'form',

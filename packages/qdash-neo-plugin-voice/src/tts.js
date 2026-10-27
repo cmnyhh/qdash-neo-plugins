@@ -28,6 +28,21 @@ export class TtsClient {
    *   换了 `DSH_HOME` 之后一个写对一个写错是最难查的一类问题。
    */
   constructor(config = {}, { log = () => {}, dir = '' } = {}) {
+    this.dir = String(dir ?? '').trim()
+    this.log = log
+    this.conf = {}
+    this.applyConfig(config)
+  }
+
+  /**
+   * 应用一份配置。
+   *
+   * 设置页保存后调它，**不用重建实例** —— 这个类除 `dir` 外没有需要保留的运行态，
+   * 重建反而会让调用方手里的引用失效（工具闭包里那个 `tts` 就永远是旧的了）。
+   *
+   * @param {object} config 完整配置，读其中的 `tts` 段
+   */
+  applyConfig(config = {}) {
     const t = config?.tts ?? {}
     this.conf = {
       enabled: t.enabled === true,
@@ -50,8 +65,7 @@ export class TtsClient {
 
       bodyTemplate: String(t.bodyTemplate ?? '').trim() || '{"text":"{{text}}"}',
     }
-    this.dir = String(dir ?? '').trim()
-    this.log = log
+    return this
   }
 
   /** 开了且配了地址才算可用 —— 只有 `enabled: true` 但没 endpoint 时，调它必然失败 */
