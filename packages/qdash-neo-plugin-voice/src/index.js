@@ -198,7 +198,9 @@ export function apply(ctx, config) {
 
     return {
       id: 'voice',
-      title: '语音库',
+      // 不叫「语音库」：那是内核在配置页里的分组（voice.* 的开关与限制）。
+      // 这个选项卡配的是 TTS，改叫「语音合成」避免两处同名。
+      title: '语音合成',
       order: 50,
       owner: NS,
       layout: [
