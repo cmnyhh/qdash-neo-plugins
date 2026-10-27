@@ -28,9 +28,9 @@
 | `voice.send()` | ✅ | 发语音（路径、体积、限流、落库全在内核） |
 | `outboxApi.forPlugin(name).sendText()` | ✅ | 走内核队列，来源标记不可伪造 |
 | `outboxApi.forPlugin(name).sendSegments()` | ✅ | 同上（图片 / 语音 / 表情） |
-| `outbox.onSendVoice()` | ❌ | 出站钩子未实现 |
-| `ctx.qdashNeo.on(...)` 事件 | ❌ | 未实现 |
-| `capabilities` 声明校验 | ❌ | 机制不存在，写了也不校验 |
+| `voice.onSendVoice()` | ✅ | 出站钩子，**只允许挂一个**（见 §2.3） |
+| `ctx.qdashNeo.on(...)` 事件 | ✅ | 只读旁听：`message/inbound` / `message/dropped` / `turn/end` |
+| `ctx.qdashNeo.capabilities` | ✅ | 只读能力清单。**不是安装期校验**（见 §2.8） |
 | `console.registerStatic()` | ❌ | 挂 `/plugin/<id>/` 静态页 |
 
 **下面章节里凡是标 ❌ 的，都是设计稿而不是现状。**
@@ -397,7 +397,25 @@ await out.sendSegments({
 **插件绕不过去，也不该绕**：直接调 OneBot HTTP 等于绕开限流、死信与审计，
 而且控制台里会看不到它发过什么。
 
-`onSendVoice`（出站钩子）仍未实现，见 §0.1。
+### 出站钩子：`voice.onSendVoice()`
+
+在语音**真正发出之前**改写它。挂在 `voice` 上，不在 `outbox` 上。
+
+```js
+const off = ctx.qdashNeo.voice.onSendVoice(({ chatKey, file, label }) => {
+  // 返回 { file?, label? } 覆盖；返回 null 原样发送
+  return { label: '被插件改过的标签' }
+})
+```
+
+规矩：
+
+- **只允许挂一个**。多个钩子串起来会变成"谁后注册谁说了算"，而晚注册的那个
+  往往只是碰巧加载得慢 —— 排查起来是噩梦。第二个注册会直接抛错
+- **抛错按"没挂钩子"处理**：记 warn 后原样发送。钩子是第三方代码，
+  不该连累语音发不出去
+- **改写后的文件仍要过体检**：体积、扩展名照查，钩子不能成为绕过检查的口子
+- 返回里没有的字段保持不变
 
 ### 2.4 console — 选项卡（详见 §5）
 
@@ -459,13 +477,55 @@ ctx.qdashNeo.judgeApi.registerProvider({
 
 > 只在 `policy.groupTrigger === 'judge'` 时这条链才会跑。默认是 `agent`（直接交给模型自决）。
 
-### 2.7 events — 内核事件
+### 2.7 events — 内核事件（已实现）
 
-**未实现。** `ctx.qdashNeo.on(...)` 在代码里不存在，调它只会拿到 `undefined`。
+```js
+const off = ctx.qdashNeo.on('message/inbound', ev => {
+  // ev 就是归一化后的消息事件：chatKey / kind / userId / text / ts …
+})
 
-想观察内核行为的插件现在没有入口；如果要补，形态应该是只读的
-（`message/inbound`、`message/dropped`、`turn/end`），**不允许在事件里阻断或改写**——
-要介入必须走 §3 的钩子。
+ctx.qdashNeo.on('message/dropped', ev => {
+  // 多两个字段：reason（被哪道闸挡住）、note（人话说明）
+})
+
+ctx.qdashNeo.on('turn/end', ({ kind, chatKey, inbound, costMs, error }) => {
+  // 一轮对话结束。失败也会发，error 里有原因 —— 只发成功的等于看不到问题
+})
+
+off()   // 取消订阅
+```
+
+**只读，不能阻断也不能改写。** 事件是旁听用的；一旦允许返回 `false` 拦消息，
+插件就成了消息处理链的一环，"某个插件装坏导致所有消息不回"只是时间问题。
+
+三个事件的时机：
+
+| 事件 | 何时 | 一定会回复吗 |
+|---|---|---|
+| `message/inbound` | 通过第一道闸（白名单/群开关） | **不一定**，后面还有批窗口、判定、沉睡 |
+| `message/dropped` | 被第一道闸挡住 | 不会 |
+| `turn/end` | 一轮对话真正跑完 | 是（`error` 非空表示这轮失败） |
+
+**监听器抛错会被吞掉并记 warn**，其他监听器照常收到。异步监听器的
+Promise rejection 也挂了 catch —— 否则会变成 `unhandledRejection` 把宿主带走。
+
+### 2.8 capabilities — 能力清单（只读）
+
+```js
+if (!ctx.qdashNeo.capabilities['console-static']) {
+  // 退回声明式选项卡，而不是调一个不存在的方法、拿到看不懂的 TypeError
+}
+```
+
+**这不是安装期校验。** 我们拿不到插件的 manifest，DSH 也不会替我们读，
+所以「声明了没用到的能力就报错」这件事**做不到**。
+
+它的实际用途是让插件在运行时判断某个能力在不在（宿主版本不同、能力面还在补），
+拿到 `false` 就走降级路径。
+
+当前清单：`console-tab` `tools` `settings` `storage` `outbox` `events`
+`voice-send` `voice-hook` `judge-provider` 为 `true`；
+`console-static` `fetch` 为 `false`。
 
 ---
 
