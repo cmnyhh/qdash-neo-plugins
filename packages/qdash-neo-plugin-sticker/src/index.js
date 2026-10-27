@@ -224,7 +224,14 @@ export function apply(ctx, config = {}) {
         if (!got) continue
         if (got.bytes.length > cfg.maxSendBytes) continue
 
-        await neo.outbox.forPlugin(NS).sendSegments({
+        /**
+         * 是 `outboxApi`，不是 `outbox`。
+         *
+         * `neo.outbox` 是内核自己的出站队列（没有 `forPlugin`）；
+         * 给插件的是 `outboxApi.forPlugin(name)` —— 它会给消息打上来源标记，
+         * 而那个标记不可伪造。文档 §0.1 写的也是 `outboxApi`。
+         */
+        await neo.outboxApi.forPlugin(NS).sendSegments({
           chatKey,
           segments: [{ type: 'image', data: { file: `base64://${got.bytes.toString('base64')}` } }],
           text: `[表情包] ${(it.tags ?? []).join('/')}`,
