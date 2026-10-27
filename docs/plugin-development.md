@@ -20,7 +20,8 @@
 |---|---|---|
 | `inject: ['qdashNeo']` | ✅ | 拿到的是内核 service 实例 |
 | `console.registerTab()` | ✅ | 声明式四块（status / table / form / actions） |
-| `tools.register()` | ✅ | 注册即授予；同时补挂到已有会话；与内核同名时内核赢 |
+| `tools.register()` | ✅ | 注册即可见，**授权才进会话**（默认不授予，见 §2.5）；与内核同名时内核赢 |
+| `instructions.register()` | ✅ | 往系统提示加一段常驻引导。**注册不生效，要单独授权**（见 §2.9） |
 | `settings.register()` | ✅ | 运行时配置，命名空间 `cfg:<plugin>:<key>` |
 | `storage.forFeature()` | ✅ | **KV only**，不支持建表 |
 | `storage.dir()` | ✅ | `<DSH_HOME>/qdash-plugins/<name>/` |
@@ -590,6 +591,73 @@ if (!ctx.qdashNeo.capabilities['console-static']) {
 `console-static` `fetch` 为 `false`。
 
 ---
+
+### 2.9 instructions — 往系统提示加常驻引导（已实现）
+
+```js
+const dispose = ctx.qdashNeo.instructions.register({
+  key: 'sticker',                       // 卸载时按它移除；重复注册视为替换
+  text: '看到群友发的图或表情包，如果以后可能用得上（好笑、能表达某种情绪、是常见的梗），' +
+        '就调 sticker_save 存下来，顺手给几个标签。一般的截图、自己拍的日常照片不用存。',
+})
+ctx.effect(() => dispose)               // 和工具/选项卡一样，必须挂生命周期
+```
+
+这段文字会拼进 `AGENTS.md` 的规则块，和内核的 `SEND_RULE` / `MEMORY_RULE` 并列，每段带来源标题：
+
+```
+【来自「sticker」插件的引导】
+看到群友发的图…
+```
+
+#### 什么时候该用它，而不是塞进工具 description
+
+用工具 `description` 的情况：**解释这个工具怎么用**（参数含义、返回值）。
+
+用 `instructions` 的情况：**描述一种行为习惯**（什么时机该想起来用它）。
+
+区别在于可见性：
+
+| | 工具 `description` | `instructions` |
+|---|---|---|
+| 什么时候被读到 | 模型"挑工具"时 | **每一轮都在** |
+| 算不算 token 预算 | 占 schema 预算，写长了挤掉别的工具 | 占提示词预算 |
+| 适合写什么 | 参数语义 | "看到 X 就做 Y"这类条件反射 |
+
+内核的 `MEMORY_RULE` 就是同一个道理：不写那段，`memory_add` 基本不会被调用。
+**「存表情包」也是同一类——不写引导，模型根本想不起来存。**
+
+#### 注册不等于生效
+
+```js
+ctx.qdashNeo.instructions.register({ key, text })   // 注册：控制台可见
+                                                    // 生效：还要 tools.grantedInstructions 里有这个 owner
+```
+
+**默认不注入。** 和工具授权同一个思路（§2.5）：插件能注册，但不能自己给自己授权。
+
+而且**授权名单是独立的**（`tools.grantedInstructions`，不是 `tools.grantedPlugins`）：
+
+> 工具是"能做什么"，引导是**行为准则**。这段文字进系统提示后能改写模型
+> 对其他事的判断 —— 比工具权限更敏感。一个插件可能"工具能用，但它的引导
+> 不想让它生效"。
+
+#### 容量
+
+| 限制 | 值 | 为什么 |
+|---|---|---|
+| 单段 | 2000 字 | 够写一段行为引导，又不至于淹掉别的内容 |
+| 全局 | 8000 字 | 提示词有预算，不是"多写点总没坏处" |
+
+超了**拒绝注册**（抛错），不会静默截断——截断的话插件作者以为写进去了。
+
+#### 生效时机
+
+- 注册时**立刻**重写 `AGENTS.md`
+- 但 DSH 的 agent 在**会话建立时**读一次 `AGENTS.md` → **已有会话不受影响**
+- 授权名单变更同理
+
+所以改完引导后，已有的 QQ 会话要等重建才看得到新内容。这条和 `agent.systemPrompt` 一样，属于当前架构的限制。
 
 ## 3. 钩子（唯一允许介入链路的地方）
 
