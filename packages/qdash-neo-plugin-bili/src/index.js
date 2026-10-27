@@ -211,9 +211,17 @@ export function apply(ctx, config = {}) {
 
   /* ---------------- 工具 ---------------- */
 
+  /**
+   * 给模型看的候选形状。
+   *
+   * `desc` 截 120 字：够它判断「这条到底讲什么」，又不至于 6 条加起来
+   * 占掉半屏 prompt。想细看的可以调 `bili_comments`，那个会带完整简介。
+   */
   const shape = list =>
     list.map(v => ({
+      aid: v.aid,
       title: v.title,
+      desc: String(v.desc ?? '').slice(0, 120),
       up: v.up,
       url: v.url,
       cover: v.pic,
@@ -262,6 +270,28 @@ export function apply(ctx, config = {}) {
     }),
   )
 
+  ctx.effect(() =>
+    neo.tools.register({
+      name: 'bili_comments',
+      owner: NS,
+      description:
+        '看一条视频的热门评论。**想了解"大家实际怎么反应"时用** —— ' +
+        '光看标题和简介只能猜内容，评论能告诉你它哪里好笑、哪里翻车、评论区在吵什么。' +
+        '觉得值得细说再调它；只是随手转一下就省了这一步。',
+      params: {
+        aid: '视频的 aid（bili_hot / bili_find 返回的 items 里带 aid）',
+        limit: '可选：要几条，默认 8',
+      },
+      async execute(args) {
+        const aid = String(args?.aid ?? '').trim()
+        if (!aid) throw new Error('缺少 aid：bili_hot / bili_find 的结果里每条都带 aid')
+        const n = Math.max(1, Math.min(20, Number(args?.limit) || 8))
+        const list = await bili.comments(aid, { cookie: cookie(), limit: n })
+        return { ok: true, count: list.length, comments: list }
+      },
+    }),
+  )
+
   /* ---------------- 引导 ---------------- */
 
   ctx.effect(() =>
@@ -270,8 +300,13 @@ export function apply(ctx, config = {}) {
       owner: NS,
       text:
         '有人排了时间让你去逛 B 站时，用 bili_hot（热门/分区）或 bili_find（按关键词搜）看看。' +
-        '看到真值得分享的，先调 qq_send_card 发卡片，**再单独发一条 qq_send_message 说你的看法** —— ' +
+        '列表里每条都带简介（desc）—— **先看简介判断它到底讲什么**，光看标题容易猜错。' +
+        '觉得有意思、想细说的时候，用 aid 调 bili_comments 看几条热评：' +
+        '评论能告诉你它哪里好笑、哪里翻车、评论区在吵什么，这些是标题和简介都给不了的。' +
+        '看完再决定值不值得分享；只是随手转一下就不必读评论了。' +
+        '分享时先调 qq_send_card 发卡片，**再单独发一条 qq_send_message 说你的看法** —— ' +
         '卡片里只有标题和封面，群里看不到你的态度。' +
+        '评价要落到具体内容上（这片子讲什么、评论区在争什么），别只写"这个不错"。' +
         '没看到什么有意思的就什么都不做，不用为了完成任务硬发一条。',
     }),
   )

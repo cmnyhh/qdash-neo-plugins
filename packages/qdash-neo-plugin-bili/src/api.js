@@ -116,14 +116,55 @@ function toItem(v) {
   const pic = String(v?.pic ?? '').trim()
   return {
     bvid,
+    /**
+     * **`aid` 必须留着**：评论接口只认它（`oid`），不认 bvid。
+     *
+     * 而拿 bvid 换 aid 要走 `view` 接口 —— 那个接口在这个 IP 上被风控，
+     * 所以「从 bvid 反查 aid」这条路是断的，只有在列表里顺手带下来才行。
+     */
+    aid: String(v?.aid ?? '').trim(),
     title,
-    desc: String(v?.desc ?? '').replace(/<[^>]+>/g, '').trim().slice(0, 120),
+    /** 简介：模型靠它判断「这条到底讲什么」 */
+    desc: String(v?.desc ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(),
     up: String(v?.owner?.name ?? v?.author ?? '').trim(),
     view: Number(v?.stat?.view ?? 0),
     pic: pic.startsWith('//') ? `https:${pic}` : pic,
     url: bvid ? `https://www.bilibili.com/video/${bvid}` : String(v?.arcurl ?? '').trim(),
     duration: Number(v?.duration ?? 0),
   }
+}
+
+/**
+ * 热门评论。**只认 `aid`**（`oid`），不认 bvid —— 见 `toItem` 里的说明。
+ *
+ * 用老接口 `x/v2/reply` 而不是 `reply/wbi/main`：后者要 wbi 签名，
+ * 实测无签名直接 -403。前者带上 cookie 就能拿到，`sort=2` 是按热度。
+ *
+ * 返回按点赞降序，只留文字 —— 模型要的是"大家在说什么"，
+ * 用户名和头像对它没用，反而占 token。
+ */
+export async function comments(aid, { cookie = '', limit = 8 } = {}) {
+  const id = String(aid ?? '').trim()
+  if (!id) throw new Error('缺少 aid（评论接口只认 aid，不认 bvid）')
+
+  const n = Math.max(1, Math.min(20, Number(limit) || 8))
+  const j = await getJson(`https://api.bilibili.com/x/v2/reply?type=1&oid=${id}&sort=2&ps=${n}&pn=1`, {
+    cookie,
+  })
+  if (j.code !== 0) throw new Error(`读评论失败 code=${j.code} ${j.message ?? ''}`)
+
+  const list = Array.isArray(j.data?.replies) ? j.data.replies : []
+  return list
+    .map(c => ({
+      like: Number(c?.like ?? 0),
+      user: String(c?.member?.uname ?? '').trim(),
+      text: String(c?.content?.message ?? '')
+        .replace(/\[[^\]]+\]/g, '') // 表情占位（[doge] 这类）留着没意义
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 140),
+    }))
+    .filter(x => x.text)
 }
 
 /**
