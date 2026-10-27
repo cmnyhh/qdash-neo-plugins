@@ -451,7 +451,36 @@ export function apply(ctx, config) {
    */
   ctx.effect(() => {
     registry()
+
+    /**
+     * **配置一变就重建选项卡。**
+     *
+     * 状态块里的「语音功能 已开启/未开启」是从 `neo.voice.describe()` 读的，
+     * 而选项卡是**注册那一刻的快照** —— 用户在配置页把语音关掉之后，
+     * 这里还写着「已开启」，两边对不上。
+     *
+     * 以前只能靠用户自己点「刷新列表」；现在内核在 `applyConfig` 末尾通知，
+     * 这里跟着重建就行。
+     *
+     * **注册即回调一次**（内核保证），所以挂载时也会跑一遍，不需要另外初始化。
+     */
+    const offConfig =
+      typeof neo.onConfigChange === 'function'
+        ? neo.onConfigChange(() => {
+            try {
+              registry()
+            } catch (err) {
+              log('warn', `qdash-neo-plugin-voice: 配置变更后重建选项卡失败 msg=${err?.message}`)
+            }
+          })
+        : null
+
     return () => {
+      try {
+        offConfig?.()
+      } catch {
+        /* 退订失败不该连带别的事 */
+      }
       try {
         dispose?.()
       } catch {

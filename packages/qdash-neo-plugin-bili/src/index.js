@@ -91,10 +91,28 @@ export function apply(ctx, config = {}) {
    * **白名单为空时什么都不发**，并留一条 warn：群白名单为空在内核里的语义是
    * 「不限群」，但插件不该据此往所有群推送 —— 那是另一种事故。
    */
+  /**
+   * 把配置里的会话标识规整成内核要的 `chatKey`。
+   *
+   * **`policy.groupWhitelist` 里存的是纯群号**（`"705590372"`），而
+   * `openProactive` 靠 `chatKey.startsWith('g:')` 判断群聊还是私聊 ——
+   * 不补前缀就会被当成**私聊**，`userId = "705590372"`，
+   * 消息发往一个不存在的用户，然后**静默失败**。
+   *
+   * 这正是"立刻试一次说成功、群里什么都没有"的原因之一。
+   */
+  const toChatKey = raw => {
+    const s = String(raw ?? '').trim()
+    if (!s) return ''
+    if (s.startsWith('g:') || s.startsWith('u:')) return s
+    // 纯数字（或其它没前缀的）一律当群号：白名单就是这么存的
+    return `g:${s}`
+  }
+
   const targets = () => {
-    const own = (conf.get().chatKeys ?? []).map(String).filter(Boolean)
+    const own = (conf.get().chatKeys ?? []).map(toChatKey).filter(Boolean)
     if (own.length) return own
-    const wl = (neo.config?.policy?.groupWhitelist ?? []).map(String).filter(Boolean)
+    const wl = (neo.config?.policy?.groupWhitelist ?? []).map(toChatKey).filter(Boolean)
     /**
      * 诊断：出现「（没配，不会发）」时，这两行能立刻分清是
      * "插件没读到内核配置" 还是 "白名单真的是空"。
@@ -184,11 +202,14 @@ export function apply(ctx, config = {}) {
 
   const tick = async () => {
     timer = null
+    /** 本轮遇到的问题（空 = 全部唤起成功） */
+    const problems = []
     try {
       const keys = targets()
       if (!keys.length) {
-        log('warn', 'qdash-neo-plugin-bili: 没有可发的群（插件 chatKeys 与群白名单都为空），跳过本轮')
-        return
+        const reason = '没有可发的群：插件 chatKeys 与内核群白名单都为空'
+        log('warn', `qdash-neo-plugin-bili: ${reason}，跳过本轮`)
+        return { ok: false, reason, count: 0 }
       }
       /**
        * 方向**每轮只选一次，所有群共用**。
@@ -199,10 +220,27 @@ export function apply(ctx, config = {}) {
       const topic = pickTopic()
       for (const key of keys) {
         try {
-          await neo.openProactive(key, { hint: hint(topic) })
+          /**
+           * **必须看返回值。**
+           *
+           * `openProactive` 有三道闸（主动发言未开 / 今日上限 / 安静时段），
+           * 被拦时它会返回 `{ ok: false, reason }` 而不是抛错 ——
+           * 早先它静默 return，这里就以为"唤起成功了"，
+           * 用户看到的是"点了没反应"，日志里一个字都没有。
+           */
+          const r = await neo.openProactive(key, { hint: hint(topic) })
+          if (r && r.ok === false) {
+            problems.push(r.reason || r.skipped || '被内核拦下')
+          }
         } catch (err) {
           log('warn', `qdash-neo-plugin-bili: 唤起 ${key} 失败 msg=${err?.message}`)
+          problems.push(`唤起失败：${err?.message}`)
         }
+      }
+      return {
+        ok: problems.length === 0,
+        reason: problems.join('；'),
+        count: keys.length,
       }
     } finally {
       schedule()
@@ -274,10 +312,20 @@ export function apply(ctx, config = {}) {
     neo.tools.register({
       name: 'bili_comments',
       owner: NS,
+      /**
+       * **评论是「理解素材」，不是「评价对象」。**
+       *
+       * 早先写的是"评论区在吵什么"，结果模型分享视频时顺带点评评论区的
+       * 人怎么吵 —— 那不是在分享视频，是在当评论区解说员。
+       *
+       * 用户的原话：「评论是用来帮助理解视频的，不要变成评论评论的人」。
+       */
       description:
-        '看一条视频的热门评论。**想了解"大家实际怎么反应"时用** —— ' +
-        '光看标题和简介只能猜内容，评论能告诉你它哪里好笑、哪里翻车、评论区在吵什么。' +
-        '觉得值得细说再调它；只是随手转一下就省了这一步。',
+        '读一条视频的热门评论，**用来读懂这条视频**：它实际讲了什么、哪里出彩、哪里翻车。' +
+        '标题和简介只有 UP 主自己那套说法，评论能反映"做出来到底怎么样"。' +
+        '**读完你心里有数就行** —— 你的任务是判断它值不值得分享，' +
+        '不是去点评评论区里的人和话。' +
+        '拿不准再看；随手转一下就省了这一步。',
       params: {
         aid: '视频的 aid（bili_hot / bili_find 返回的 items 里带 aid）',
         limit: '可选：要几条，默认 8',
@@ -301,9 +349,15 @@ export function apply(ctx, config = {}) {
       text:
         '有人排了时间让你去逛 B 站时，用 bili_hot（热门/分区）或 bili_find（按关键词搜）看看。' +
         '列表里每条都带简介（desc）—— **先看简介判断它到底讲什么**，光看标题容易猜错。' +
-        '觉得有意思、想细说的时候，用 aid 调 bili_comments 看几条热评：' +
-        '评论能告诉你它哪里好笑、哪里翻车、评论区在吵什么，这些是标题和简介都给不了的。' +
-        '看完再决定值不值得分享；只是随手转一下就不必读评论了。' +
+        /**
+         * **评论的定位：帮助理解视频，不是拿来评价的。**
+         *
+         * 之前写"评论区在吵什么"，模型就真的去转述评论区怎么吵 ——
+         * 分享视频变成了点评评论区，跑偏了。
+         */
+        '拿不准它到底怎么样时，用 aid 调 bili_comments 读几条热评 —— ' +
+        '**评论是用来看懂视频的**：它实际做得好不好、哪里被夸哪里被骂。读完心里有数就够了。' +
+        '只是随手转一下就不必读评论了。' +
         /**
          * **一轮只分享一条。**
          *
@@ -324,7 +378,15 @@ export function apply(ctx, config = {}) {
          */
         '**那条文字只写看法，不要把链接再贴一遍** —— 卡片本身就能点开，' +
         '重复贴出来，群里看到的是同一个视频响了两回。' +
-        '评价要落到具体内容上（这片子讲什么、评论区在争什么），别只写"这个不错"。' +
+        /**
+         * **评价落在视频本身，别点评评论区。**
+         *
+         * 模型很容易把"我读了评论"当成素材，于是分享时说的是
+         * "评论区都在吵 XX" —— 群里看到的是一个人在解说评论区，
+         * 而不是在分享一个视频。
+         */
+        '评价落在**视频本身**：它讲什么、你看到哪觉得有意思，一两句具体的就够。' +
+        '别只写"这个不错"，也别转述或点评评论区 —— 你是分享视频的人，不是评论区的解说员。' +
         '没看到什么有意思的就什么都不做，不用为了完成任务硬发一条。',
     }),
   )
@@ -478,10 +540,20 @@ export function apply(ctx, config = {}) {
             id: 'once',
             label: '立刻试一次',
             run: async () => {
-              const keys = targets()
-              if (!keys.length) return { ok: false, message: '没有可发的群：先配群白名单' }
-              await tick()
-              return { ok: true, message: `已唤起 ${keys.length} 个会话` }
+              /**
+               * **把内核拦下的原因原样报出来。**
+               *
+               * 早先这里只看 `targets()` 非空就返回「已唤起 N 个会话」，
+               * 而 `openProactive` 可能因为「主动发言没开 / 今日上限 / 安静时段」
+               * 直接跳过 —— 于是按钮点了、横幅说成功、群里什么都没发生。
+               *
+               * 这几道闸都在内核侧，插件唯一能做的就是**让它可见**。
+               */
+              const r = await tick()
+              if (r?.ok === false) {
+                return { ok: false, message: r.reason || '没发出去' }
+              }
+              return { ok: true, message: `已唤起 ${r?.count ?? 0} 个会话（模型会自行判断要不要发）` }
             },
           },
         ],
@@ -547,7 +619,30 @@ export function apply(ctx, config = {}) {
 
   ctx.effect(() => {
     refreshTab()
+
+    /**
+     * 配置一变就重建选项卡 —— 「间隔 / 目标群 / 方向」都会显示在状态块里，
+     * 而选项卡是注册时的快照，不重建就一直是旧值。
+     *
+     * 内核的 `onConfigChange` **注册即回调一次**，所以挂载时也会跑一遍。
+     */
+    const offConfig =
+      typeof neo.onConfigChange === 'function'
+        ? neo.onConfigChange(() => {
+            try {
+              refreshTab()
+            } catch (err) {
+              log('warn', `qdash-neo-plugin-bili: 配置变更后重建选项卡失败 msg=${err?.message}`)
+            }
+          })
+        : null
+
     return () => {
+      try {
+        offConfig?.()
+      } catch {
+        /* 退订失败不该连带别的事 */
+      }
       try {
         disposeTab?.()
       } catch {
