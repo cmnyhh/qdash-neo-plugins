@@ -126,22 +126,59 @@ export function apply(ctx, config = {}) {
 
   /* ---------------- 定时 ---------------- */
 
-  const schedule = () => {
+  /**
+   * @param {number} [elapsedMs] 上一轮已经跑掉的时间，用来补偿间隔
+   */
+  const schedule = (elapsedMs = 0) => {
     if (timer) {
       clearTimeout(timer)
       timer = null
     }
     if (!conf.get().enabled) return
 
-    const min = Math.max(10, Number(conf.get().minMinutes) || 180)
+    /**
+     * **下限是 1 分钟，不是 10。**
+     *
+     * 这里原来写 `Math.max(10, …)`，于是配置页填 1 分钟、2 分钟都没用 ——
+     * 实际永远至少等 10 分钟，而**配置页照原样显示你填的值**，
+     * 看起来像"设置不生效"。
+     *
+     * 那个 10 应该是为了防高频调 B 站接口，但热门榜不是按次计费的接口，
+     * 1 分钟一次完全没问题；真要限流该由调用方自己控制。
+     */
+    const min = Math.max(1, Number(conf.get().minMinutes) || 180)
     const max = Math.max(min, Number(conf.get().maxMinutes) || 480)
+    /**
+     * **间隔从"上一轮开始"算，不从"结束"算。**
+     *
+     * 原来 `tick` 在 `finally` 里调 `schedule()`，而那时一轮已经跑完了 ——
+     * 于是实际周期 = 执行耗时 + 间隔。设 1 分钟、一轮跑 3 分钟，
+     * 实际就是 4 分钟一次，而日志只会写"1 分钟"。
+     *
+     * 现在把执行耗时算进去：`waitMs = gap - elapsed`。
+     * 兜底留 15 秒喘息 —— 执行比间隔还长时不能无缝连跑。
+     */
     const gapMs = Math.round((min + Math.random() * (max - min)) * 60_000)
+    /**
+     * 本轮已经跑了 `elapsedMs`，剩下的时间补上就行。
+     *
+     * 兜底 15 秒：执行比间隔还长时（比如一轮唤起 3 个群各等了 40 秒），
+     * 不能无缝连跑，否则就是一个死循环，而且会持续占用模型调用。
+     */
+    const waitMs = Math.max(15_000, gapMs - elapsedMs)
 
-    nextAt = Date.now() + gapMs
+    nextAt = Date.now() + waitMs
     store.set('nextAt', nextAt)
-    timer = setTimeout(tick, gapMs)
+    timer = setTimeout(tick, waitMs)
     // 不阻止进程退出：这是个后台节奏，不是必须完成的任务
     timer.unref?.()
+    if (elapsedMs > 5_000) {
+      log(
+        'info',
+        `qdash-neo-plugin-bili: 本轮耗时 ${Math.round(elapsedMs / 1000)}s，` +
+          `${(waitMs / 60_000).toFixed(1)} 分钟后下一轮`,
+      )
+    }
   }
 
   /**
@@ -202,6 +239,8 @@ export function apply(ctx, config = {}) {
 
   const tick = async () => {
     timer = null
+    /** 记开始时间：`finally` 里要把它算进间隔，不然实际周期会多出一整轮的执行时间 */
+    const startedAt = Date.now()
     /** 本轮遇到的问题（空 = 全部唤起成功） */
     const problems = []
     try {
@@ -243,7 +282,8 @@ export function apply(ctx, config = {}) {
         count: keys.length,
       }
     } finally {
-      schedule()
+      // 把这一轮的耗时传进去，让间隔从"开始"算而不是"结束"算
+      schedule(Date.now() - startedAt)
     }
   }
 
