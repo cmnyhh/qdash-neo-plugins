@@ -334,19 +334,33 @@ export function apply(ctx, config = {}) {
    *
    * 只留最近 100 个 aid：热门榜的重复周期就几轮，久远的应该允许再推。
    */
-  const SEEN_KEY = 'seenAids'
-  const seenList = () => {
+  /**
+   * **只记最近 2 轮，而不是最近 100 个 aid。**
+   *
+   * 原来是累加保留 100 个：热门榜本身只有几十条，几轮下来**整个榜都被标成
+   * 「看过」**，于是每轮都是"整页 seen"，而引导里写着"整页 seen 就不发" ——
+   * 结果就是 1 分钟唤起一次，8~11 分钟才发一条。
+   *
+   * 改成按轮次记：只保留最近 2 轮看到过的 aid。榜单不变时，第 3 轮那些条目
+   * 重新变成"没看过"，它又能挑了。
+   *
+   * 代价：可能重复推几天前的同一条。但热门榜本来就几小时才换，
+   * "完全不重复"和"一直不发"之间只能选后者更糟。
+   */
+  const SEEN_KEY = 'seenRounds'
+  const seenRounds = () => {
     const v = store.get(SEEN_KEY)
-    return Array.isArray(v) ? v.map(String) : []
+    return Array.isArray(v) ? v.filter(Array.isArray) : []
   }
   const markSeen = list => {
-    const seen = new Set(seenList())
+    const rounds = seenRounds()
+    const seen = new Set(rounds.flat().map(String))
     const shaped = shape(list).map(x => ({ ...x, seen: seen.has(String(x.aid)) }))
     // 没看过的在前；同组内保持原顺序（榜单本身就是按热度排的）
     shaped.sort((a, b) => (a.seen ? 1 : 0) - (b.seen ? 1 : 0))
-    // 记录本轮的 aid，滚动保留最近 100 个
-    const next = [...new Set([...seen, ...list.map(v => String(v.aid))])].slice(-100)
-    store.set(SEEN_KEY, next)
+    // 本轮 + 上一轮，最多两轮
+    const ids = list.map(v => String(v.aid))
+    store.set(SEEN_KEY, [ids, ...rounds].slice(0, 2))
     return shaped
   }
 
@@ -490,12 +504,17 @@ export function apply(ctx, config = {}) {
         /**
          * `seen` 字段要说清，否则模型看到 true 不知道什么意思。
          *
-         * 它是"前几轮已经推给你看过的"——热门榜几小时内不变，不标注的话
-         * 模型每次看到同一批，会以为"就这些"，然后跳过。
+         * **但不能再写"整页都是 seen 就不发"。**
+         *
+         * 那句话配上"累加保留 100 个"的记忆，热门榜几轮就被标满，
+         * 之后每轮都是"整页 seen"→ 直接跳过。实测表现是
+         * **1 分钟唤起一次、8~11 分钟才发一条**，看起来像定时器坏了。
+         *
+         * 现在 `seen` 只记最近两轮，整页标满的情况偶尔还会有（榜单真的没变），
+         * 所以允许它从见过的里面挑一个 —— 宁可重复，也别一直不出声。
          */
-        '列表里 `seen: true` 的是**前几轮已经给你看过的**（可能你也发过）—— ' +
-        '优先挑没标 seen 的；如果**整页都是 seen**，说明榜单这几天没换，' +
-        '那这轮就不发，等下次。' +
+        '列表里 `seen: true` 的是**最近两轮给你看过的** —— ' +
+        '优先挑没标的；**整页都标了也没关系**，挑一个你最有话说的就行。' +
         '但确实翻下来都一般，就什么都不做，不用为了完成任务硬发一条。',
     }),
   )
