@@ -256,15 +256,59 @@ export function apply(ctx, config = {}) {
    * 占掉半屏 prompt。想细看的可以调 `bili_comments`，那个会带完整简介。
    */
   const shape = list =>
-    list.map(v => ({
-      aid: v.aid,
-      title: v.title,
-      desc: String(v.desc ?? '').slice(0, 120),
-      up: v.up,
-      url: v.url,
-      cover: v.pic,
-      view: v.view > 10000 ? `${Math.round(v.view / 10000)}万` : String(v.view),
-    }))
+    list.map(v => {
+      /**
+       * **简介可能没有，得说清楚。**
+       *
+       * 实测热门榜里 `desc` 大多是完整的（一百多字），但有一部分是空串或
+       * 单个 `"-"` —— 那种条目模型只看得到标题，判断不了内容，就会犹豫着不发。
+       *
+       * 模型的原话："Title only + no desc. I'm not sure it's AI. Risky to assert."
+       * 它宁可跳过也不愿瞎猜。
+       *
+       * 所以：desc 太短时补上**分区**（`tname`），并显式标注"无简介" ——
+       * 让它知道这是"信息不全"，而不是"我漏看了"。
+       */
+      const desc = String(v.desc ?? '').trim()
+      const useful = desc.length >= 8 && desc !== '-'
+      return {
+        aid: v.aid,
+        title: v.title,
+        desc: useful ? desc.slice(0, 120) : `（无简介${v.tname ? `，分区：${v.tname}` : ''}）`,
+        up: v.up,
+        url: v.url,
+        cover: v.pic,
+        view: v.view > 10000 ? `${Math.round(v.view / 10000)}万` : String(v.view),
+      }
+    })
+
+  /**
+   * **把看过/发过的条目排到后面。**
+   *
+   * 问题：热门榜几小时内基本不变，而每次唤起都会推同一批。模型自己也记得
+   * （"万字复盘AL惨败 (already done)"），于是越看越没得挑，最后跳过。
+   *
+   * 做法上**不硬删**——如果榜单真没变化，删完就是空列表，它反而更没法发。
+   * 改成「标注 + 重排」：没看过的在前，看过的标 `seen`，让它优先挑新的；
+   * 真没新的，它至少知道"这些我都看过"，可以理直气壮地这轮不发。
+   *
+   * 只留最近 100 个 aid：热门榜的重复周期就几轮，久远的应该允许再推。
+   */
+  const SEEN_KEY = 'seenAids'
+  const seenList = () => {
+    const v = store.get(SEEN_KEY)
+    return Array.isArray(v) ? v.map(String) : []
+  }
+  const markSeen = list => {
+    const seen = new Set(seenList())
+    const shaped = shape(list).map(x => ({ ...x, seen: seen.has(String(x.aid)) }))
+    // 没看过的在前；同组内保持原顺序（榜单本身就是按热度排的）
+    shaped.sort((a, b) => (a.seen ? 1 : 0) - (b.seen ? 1 : 0))
+    // 记录本轮的 aid，滚动保留最近 100 个
+    const next = [...new Set([...seen, ...list.map(v => String(v.aid))])].slice(-100)
+    store.set(SEEN_KEY, next)
+    return shaped
+  }
 
   ctx.effect(() =>
     neo.tools.register({
@@ -282,7 +326,9 @@ export function apply(ctx, config = {}) {
         const n = Math.max(1, Math.min(15, Number(args?.limit) || conf.get().limit || 6))
         const rid = String(args?.rid ?? '').trim()
         const list = rid ? await bili.ranking(rid, { limit: n }) : await bili.popular({ limit: n })
-        return { ok: true, count: list.length, items: shape(list) }
+        // `markSeen` = shape + 标注「看过」+ 把新的排前面
+        const items = markSeen(list)
+        return { ok: true, count: items.length, items }
       },
     }),
   )
@@ -303,7 +349,9 @@ export function apply(ctx, config = {}) {
         }
         const n = Math.max(1, Math.min(15, Number(args?.limit) || conf.get().limit || 6))
         const list = await bili.search(kw, { cookie: cookie(), limit: n })
-        return { ok: true, count: list.length, items: shape(list) }
+        // `markSeen` = shape + 标注「看过」+ 把新的排前面
+        const items = markSeen(list)
+        return { ok: true, count: items.length, items }
       },
     }),
   )
@@ -387,7 +435,28 @@ export function apply(ctx, config = {}) {
          */
         '评价落在**视频本身**：它讲什么、你看到哪觉得有意思，一两句具体的就够。' +
         '别只写"这个不错"，也别转述或点评评论区 —— 你是分享视频的人，不是评论区的解说员。' +
-        '没看到什么有意思的就什么都不做，不用为了完成任务硬发一条。',
+        /**
+         * **"群里没人说话"不是不发理由。**
+         *
+         * 模型的原话："Group is silent since midnight. Don't spam."
+         * 它把"安静"读成了"别打扰"，于是主动分享变成了等别人先开口 ——
+         * 而主动分享的时机本来就只有没人说话的时候。
+         *
+         * 另外：简介为空时（列表里标成「（无简介，分区：xx）」）不代表这条没意思，
+         * 想确认就调 bili_comments 看几条，别只因为看不到简介就跳过。
+         */
+        '群里安静是正常的 —— **主动分享本来就是在没人说话的时候开口**，不用等别人先聊。' +
+        '候选里标着「（无简介）」的，想确认就调 bili_comments 看一眼，别只因为看不到简介就跳过。' +
+        /**
+         * `seen` 字段要说清，否则模型看到 true 不知道什么意思。
+         *
+         * 它是"前几轮已经推给你看过的"——热门榜几小时内不变，不标注的话
+         * 模型每次看到同一批，会以为"就这些"，然后跳过。
+         */
+        '列表里 `seen: true` 的是**前几轮已经给你看过的**（可能你也发过）—— ' +
+        '优先挑没标 seen 的；如果**整页都是 seen**，说明榜单这几天没换，' +
+        '那这轮就不发，等下次。' +
+        '但确实翻下来都一般，就什么都不做，不用为了完成任务硬发一条。',
     }),
   )
 
