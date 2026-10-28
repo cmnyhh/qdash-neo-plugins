@@ -143,7 +143,8 @@ export function apply(ctx, config = {}) {
     name: 'sticker_save',
     owner: NS,
     description:
-      '把当前对话里的一张图收藏进表情包库，以后可以用 qq_send_sticker 找出来发。' +
+      // 不写"表情包库"：这个描述会进 prompt，模型会照着说「库里没有」
+      '把当前对话里的一张图收起来，以后可以用 qq_send_sticker 找出来发。' +
       '**只存"以后还用得上"的**：好笑、能表达某种情绪、是常见的梗。' +
       '一般的截图、自己拍的日常照片、一次性的图不用存。' +
       '标签写**这张图表达什么**（笑死、无语、嘲讽、雀跃），不是"画面里有什么"。',
@@ -199,7 +200,7 @@ export function apply(ctx, config = {}) {
     name: 'qq_send_sticker',
     owner: NS,
     description:
-      '从表情包库按标签找一张图发到当前会话。' +
+      '找一张合适的表情发到当前会话。' +
       '**聊天里想用表情包时用它**：比说话更有力、或者懒得打字的时候。' +
       '找不到合适的标签就改说文字，**不要硬找一个不相关的发出去**。',
     params: { query: '要找什么。写你想表达的情绪或场合，比如"笑死""无语"' },
@@ -213,7 +214,8 @@ export function apply(ctx, config = {}) {
         return {
           ok: false,
           reason: 'no-match',
-          hint: `库里没有「${query}」相关的图。这次改说文字吧，别硬凑。`,
+          // 这句会回给模型，"库"同样不要说 —— 它会转述成「库里没有」
+      hint: `没有「${query}」相关的图。这次改说文字吧，别硬凑。`,
           total: store.describe().count,
         }
       }
