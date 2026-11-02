@@ -4,3 +4,9 @@ node_modules/
 Thumbs.db
 .env
 .env.local
+
+# 美团插件只在本地跑，不进版本控制。
+# 它依赖一个 Python + Playwright 的 MCP 服务器（要手机/浏览器登录态），
+# 不是"clone 下来就能用"的东西，放进仓库只会让接手的人困惑。
+# 想临时恢复跟踪：git add -f packages/qdash-neo-plugin-meituan/
+packages/qdash-neo-plugin-meituan/
