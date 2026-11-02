@@ -1,6 +1,6 @@
 {
   "name": "@cmnyhh/qdash-neo-plugin-bili",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "定时让模型去逛 B 站，看到值得聊的就发卡片 + 一句评价",
   "type": "module",
   "main": "./src/index.js",

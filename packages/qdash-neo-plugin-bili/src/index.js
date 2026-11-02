@@ -169,6 +169,18 @@ export function apply(ctx, config = {}) {
 
     nextAt = Date.now() + waitMs
     store.set('nextAt', nextAt)
+    /**
+     * **把实际排期打出来。**
+     *
+     * 用户反馈"设了间隔不生效"——而原来这条信息只在耗时超过 5 秒时才打，
+     * 于是"它到底按几分钟排的"永远看不见。现在每次排期都说一句：
+     * 配置值是什么、实际算出来多少。**对不上就能立刻发现。**
+     */
+    log(
+      'info',
+      `qdash-neo-plugin-bili: 下次 ${(waitMs / 60_000).toFixed(1)} 分钟后` +
+        `（配置 ${min}–${max} 分钟）`,
+    )
     timer = setTimeout(tick, waitMs)
     // 不阻止进程退出：这是个后台节奏，不是必须完成的任务
     timer.unref?.()
@@ -239,6 +251,19 @@ export function apply(ctx, config = {}) {
 
   const tick = async () => {
     timer = null
+    /**
+     * **先看还开不开着。**
+     *
+     * `schedule()` 里已经查过 `enabled`，但那只管"排不排下一轮"：
+     * 用户把开关关掉时，**当前这个 setTimeout 已经排好了**，它到点照样触发，
+     * 于是"关了还发了一次"。
+     *
+     * 这里再查一次，关掉就是立刻停 —— 不再有"最后一轮"。
+     */
+    if (!conf.get().enabled) {
+      log('info', 'qdash-neo-plugin-bili: 已停用，本轮跳过')
+      return { ok: false, reason: '插件已停用', count: 0 }
+    }
     /** 记开始时间：`finally` 里要把它算进间隔，不然实际周期会多出一整轮的执行时间 */
     const startedAt = Date.now()
     /** 本轮遇到的问题（空 = 全部唤起成功） */
@@ -360,7 +385,16 @@ export function apply(ctx, config = {}) {
     shaped.sort((a, b) => (a.seen ? 1 : 0) - (b.seen ? 1 : 0))
     // 本轮 + 上一轮，最多两轮
     const ids = list.map(v => String(v.aid))
-    store.set(SEEN_KEY, [ids, ...rounds].slice(0, 2))
+    /**
+     * **记 20 轮，不是 2 轮。**
+     *
+     * 早先是 `slice(0, 2)` —— 只记住最近两轮见过哪些 aid。而热门榜变化很慢：
+     * 同一个视频能在榜上挂好几天，两轮之后它就不再算"见过"，
+     * 于是又被当成新内容发一遍。**这就是"重复率太高"的直接原因。**
+     *
+     * 20 轮 × 6 条 ≈ 120 个 aid，几十 KB，完全不是负担。
+     */
+    store.set(SEEN_KEY, [ids, ...rounds].slice(0, 20))
     return shaped
   }
 
