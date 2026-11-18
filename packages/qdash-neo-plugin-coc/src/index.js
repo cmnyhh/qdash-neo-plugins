@@ -128,6 +128,21 @@ export function apply(ctx, config = {}) {
       autoSceneArt: config?.autoSceneArt !== false,
       /** 回顾默认条数 */
       recentLimit: toNum(config?.recentLimit, 30),
+      /**
+       * **生图后端放在 settings 而不是 Config。**
+       *
+       * `Config.image` 是部署层配置（`cordis.patch.yml`），改一次要重启；
+       * 而"换个生图地址"是随时会做的事，得在控制台里当场能改。
+       *
+       * `Config.image` 仍然生效 —— 作为 settings 留空时的兜底，
+       * 部署方想固化默认值就写在 patch 里。
+       */
+      imageEndpoint: '',
+      imageApiKey: '',
+      imageProtocol: 'openai',
+      imageSize: '512x512',
+      imageStyle: '',
+      imageNegative: '',
     },
   })
 
@@ -152,7 +167,38 @@ export function apply(ctx, config = {}) {
   } catch {
     /* 没有目录就不画图，不影响跑团 */
   }
-  const images = new ImageClient({ config: imageCfg, dir: imgDir, log })
+  const images = new ImageClient({
+    /**
+     * **每次读最新值**：控制台改完立刻生效，不用重启。
+     *
+     * 优先级：settings（控制台）> `Config.image`（patch 部署层）> 内置默认。
+     * `timeoutMs` / `steps` / `resultPath` / `bodyTemplate` 只在 patch 里配 ——
+     * 它们不是"日常会调"的东西，摊在控制台上只会增加误操作。
+     */
+    getConfig: () => {
+      const c = conf.get()
+      const fallback = imageCfg ?? {}
+      const pick = (key, dflt = '') => {
+        const fromSettings = String(c?.[key] ?? '').trim()
+        return fromSettings || String(fallback[key] ?? '').trim() || dflt
+      }
+      return {
+        endpoint: pick('imageEndpoint'),
+        apiKey: pick('imageApiKey'),
+        protocol: pick('imageProtocol', 'openai'),
+        size: pick('imageSize', '512x512'),
+        stylePrefix: pick('imageStyle'),
+        negativePrompt: pick('imageNegative'),
+        model: fallback.model ?? 'dall-e-3',
+        steps: fallback.steps ?? 24,
+        timeoutMs: fallback.timeoutMs ?? 120000,
+        resultPath: fallback.resultPath ?? 'image',
+        bodyTemplate: fallback.bodyTemplate,
+      }
+    },
+    dir: imgDir,
+    log,
+  })
 
   /** 出站句柄：只用来补发生图结果 */
   let out = null
@@ -1068,7 +1114,9 @@ export function apply(ctx, config = {}) {
     const c = conf.get()
     const { scenes, sheets, archived } = collectStats()
     const recent = recentScenes()
-    const imgState = images.ready ? '已配置' : '未配置（不画图，其余功能正常）'
+    const imgState = images.ready
+      ? `${c.imageProtocol || 'openai'} · ${images.config.size || '512x512'}`
+      : '未配置（在下方「生图后端」里填地址）'
 
     try {
       tabDispose = neo.console.registerTab({
@@ -1130,6 +1178,57 @@ export function apply(ctx, config = {}) {
             submit: { id: 'save', label: '保存' },
           },
           {
+            /**
+             * **生图后端单独一块。**
+             *
+             * 和上面那组开关分开，因为它们改的是"要不要画"，
+             * 这块改的是"画得出来吗" —— 混在一起会让人误以为
+             * 打开开关就等于配好了后端。
+             */
+            type: 'form',
+            title: '生图后端',
+            fields: [
+              {
+                path: 'imageEndpoint',
+                label: '服务地址',
+                value: c.imageEndpoint ?? '',
+                description:
+                  '例：http://127.0.0.1:7860/sdapi/v1/txt2img。**留空就不画图** —— 建卡、切场景照常，只是没有图。',
+              },
+              {
+                path: 'imageProtocol',
+                label: '协议',
+                options: [
+                  { value: 'openai', label: 'openai（/v1/images/generations）' },
+                  { value: 'sdapi', label: 'sdapi（SD WebUI）' },
+                  { value: 'custom', label: 'custom（自定义）' },
+                ],
+                value: c.imageProtocol || 'openai',
+              },
+              {
+                path: 'imageApiKey',
+                label: 'API Key',
+                type: 'password',
+                value: c.imageApiKey ?? '',
+                description: '本地服务通常留空。密码框只防误截图，能打开控制台的都看得到。',
+                when: { path: 'imageProtocol', in: ['openai'] },
+              },
+              {
+                path: 'imageSize',
+                label: '尺寸',
+                value: c.imageSize || '512x512',
+                description: '如 512x512、768x512。太大在 1.6G 内存的机器上会很慢。',
+              },
+              {
+                path: 'imageStyle',
+                label: '风格前缀',
+                value: c.imageStyle ?? '',
+                description: '留空用内置的 1920s cosmic horror 那套；想换画风就写自己的。',
+              },
+            ],
+            submit: { id: 'saveImage', label: '保存生图配置' },
+          },
+          {
             type: 'actions',
             actions: [
               {
@@ -1169,6 +1268,30 @@ export function apply(ctx, config = {}) {
             conf.set(patch)
             renderTab()
             return { ok: true, message: '已保存，立即生效' }
+          },
+
+          /**
+           * 生图配置的保存。
+           *
+           * **`ok` 恒为 true**：这是"保存配置"，不是"测试连通性"。
+           * 地址填错也保存成功 —— 用户可能想先填后调。
+           * 能不能连通会在下一次 `qq_coc_art` 的返回里体现。
+           */
+          saveImage: async ({ values } = {}) => {
+            const patch = {}
+            for (const k of ['imageEndpoint', 'imageApiKey', 'imageProtocol', 'imageSize', 'imageStyle']) {
+              if (values && k in values) patch[k] = String(values[k] ?? '').trim()
+            }
+            conf.set(patch)
+            renderTab()
+
+            const ready = images.ready
+            return {
+              ok: true,
+              message: ready
+                ? '已保存，生图后端可用'
+                : '已保存，但地址为空 —— 之后不会画图（其余功能不受影响）',
+            }
           },
         },
       })

@@ -51,17 +51,23 @@ function pickPath(obj, path) {
 }
 
 export class ImageClient {
+  /** 每次读配置，见 `get config` */
+  #getConfig
+
   /**
    * @param {{
    *   config?: object,
+   *   getConfig?: () => object,
    *   dir?: string,
    *   log?: Function,
    *   fetchImpl?: Function,
    * }} deps
-   *   `config` 是 `Config.image` 那块；`dir` 是 `storage.dir('coc','img')`
+   *   `getConfig` 优先于 `config`：**控制台改完不该重启才生效**，
+   *   所以插件传的是"读当前 settings"的函数，而不是构造时的快照。
+   *   `config` 保留是为了测试能直接塞一个静态对象。
    */
-  constructor({ config = {}, dir = '', log = () => {}, fetchImpl = null } = {}) {
-    this.config = config ?? {}
+  constructor({ config = {}, getConfig = null, dir = '', log = () => {}, fetchImpl = null } = {}) {
+    this.#getConfig = typeof getConfig === 'function' ? getConfig : () => config ?? {}
     this.dir = String(dir ?? '')
     this.log = log
     this.fetchImpl = fetchImpl ?? (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null)
@@ -73,6 +79,11 @@ export class ImageClient {
         this.log('warn', `qdash-neo-plugin-coc: 创建图片目录失败 msg=${err?.message}`)
       }
     }
+  }
+
+  /** 当前生效的配置（控制台改完立刻反映到 `ready` 与 prompt） */
+  get config() {
+    return this.#getConfig() ?? {}
   }
 
   /**
@@ -133,11 +144,16 @@ export class ImageClient {
    * @returns {Promise<{ bytes: Buffer, ext: string } | null>}
    */
   async #request(prompt, kind) {
-    const endpoint = String(this.config?.endpoint ?? '').trim()
-    const protocol = String(this.config?.protocol ?? 'openai').trim().toLowerCase()
-    const apiKey = String(this.config?.apiKey ?? '').trim()
-    const { width, height } = parseSize(this.config?.size)
-    const timeoutMs = Math.max(5000, Number(this.config?.timeoutMs) || 120_000)
+    /**
+     * **只在开头读一次。** `config` 是 getter（每次回控制台的最新值），
+     * 中途重读既没意义，又可能拿到两次不一致的快照。
+     */
+    const cfg = this.config
+    const endpoint = String(cfg.endpoint ?? '').trim()
+    const protocol = String(cfg.protocol ?? 'openai').trim().toLowerCase()
+    const apiKey = String(cfg.apiKey ?? '').trim()
+    const { width, height } = parseSize(cfg.size)
+    const timeoutMs = Math.max(5000, Number(cfg.timeoutMs) || 120_000)
 
     const headers = { 'Content-Type': 'application/json' }
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`
@@ -146,13 +162,13 @@ export class ImageClient {
     if (protocol === 'sdapi') {
       body = {
         prompt,
-        negative_prompt: String(this.config?.negativePrompt ?? '').trim(),
+        negative_prompt: String(cfg.negativePrompt ?? '').trim(),
         width,
         height,
-        steps: Math.max(1, Number(this.config?.steps) || 24),
+        steps: Math.max(1, Number(cfg.steps) || 24),
       }
     } else if (protocol === 'custom') {
-      const tpl = this.config?.bodyTemplate
+      const tpl = cfg.bodyTemplate
       body =
         tpl && typeof tpl === 'object'
           ? JSON.parse(
@@ -165,7 +181,7 @@ export class ImageClient {
     } else {
       // openai 兼容
       body = {
-        model: String(this.config?.model ?? 'dall-e-3'),
+        model: String(cfg.model ?? 'dall-e-3'),
         prompt,
         n: 1,
         size: `${width}x${height}`,
@@ -190,7 +206,7 @@ export class ImageClient {
       protocol === 'sdapi'
         ? json?.images?.[0]
         : protocol === 'custom'
-          ? pickPath(json, this.config?.resultPath || 'image')
+          ? pickPath(json, cfg.resultPath || 'image')
           : (json?.data?.[0]?.b64_json ?? json?.data?.[0]?.url)
 
     if (!payload) throw new Error('响应里没有图片字段')

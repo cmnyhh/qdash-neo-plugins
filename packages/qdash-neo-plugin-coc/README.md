@@ -21,7 +21,9 @@ pnpm add @cmnyhh/qdash-neo-plugin-coc
 
 ## 生图（可选）
 
-`cordis.patch.yml` 里留了空位，填上就能用：
+**在控制台「跑团」页 →「生图后端」里填地址，保存立刻生效，不用重启。**
+
+也可以在 `cordis.patch.yml` 里配，作为默认值（控制台留空时用它）：
 
 ```yaml
 - insert:
@@ -33,6 +35,9 @@ pnpm add @cmnyhh/qdash-neo-plugin-coc
           apiKey: ''
           protocol: 'sdapi'
 ```
+
+**两处的优先级**：控制台填了就用控制台的；控制台留空才用 patch 里的。
+`timeoutMs` / `steps` / `resultPath` / `bodyTemplate` 只在 patch 里配（这些不是日常会调的东西）。
 
 三种协议：
 
