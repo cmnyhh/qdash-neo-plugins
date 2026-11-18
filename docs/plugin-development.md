@@ -681,19 +681,37 @@ ctx.qdashNeo.on('turn/end', ({ kind, chatKey, inbound, costMs, error }) => {
   // 一轮对话结束。失败也会发，error 里有原因 —— 只发成功的等于看不到问题
 })
 
+/**
+ * **出站**：模型或插件把消息推进队列时触发。
+ *
+ * 只带"要发什么"，**不带"发成功没有"** —— 入队后内容就定了，而
+ * 死信重试会让同一内容发多次，等到"发送成功"再发事件反而会记重。
+ *
+ * 分片不合并：一条长回复被拆成 3 片就是 3 次。记录类插件要的就是逐条。
+ */
+ctx.qdashNeo.on('message/outbound', ({ chatKey, text, kind, from, qqMsgId, ts }) => {
+  // kind: 'text' | 'segments'（段消息的 text 是 `[图片]` 这类标签）
+  // from: 'plugin:coc' / 'card' / 工具名；空串表示内核自己发
+})
+
 off()   // 取消订阅
 ```
 
 **只读，不能阻断也不能改写。** 事件是旁听用的；一旦允许返回 `false` 拦消息，
 插件就成了消息处理链的一环，"某个插件装坏导致所有消息不回"只是时间问题。
 
-三个事件的时机：
+四个事件的时机：
 
 | 事件 | 何时 | 一定会回复吗 |
 |---|---|---|
 | `message/inbound` | 通过第一道闸（白名单/群开关） | **不一定**，后面还有批窗口、判定、沉睡 |
 | `message/dropped` | 被第一道闸挡住 | 不会 |
 | `turn/end` | 一轮对话真正跑完 | 是（`error` 非空表示这轮失败） |
+| `message/outbound` | **出站入队时**（每条一次，分片不合并） | 这条是"**要发**"，不是"发成功"；死信重试不会重复发事件 |
+
+**`message/outbound` 和 `turn/end` 的区别**：`turn/end` 一轮一次，带的是入站事件；
+`message/outbound` 一条出站一次，带的是 `text`。要重建"谁说了什么"的完整对话，
+两个都要订阅 —— 只订 `turn/end` 是拿不到模型输出了什么的。
 
 **监听器抛错会被吞掉并记 warn**，其他监听器照常收到。异步监听器的
 Promise rejection 也挂了 catch —— 否则会变成 `unhandledRejection` 把宿主带走。

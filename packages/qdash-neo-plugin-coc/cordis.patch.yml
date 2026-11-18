@@ -1,0 +1,17 @@
+# 装进 DSH 时由 `dsh plugin add` 读这个文件。
+#
+# `name` 必须和 `package.json` 的 `name` 一致 —— 写成别的会加载失败，
+# 且报错只说"找不到插件"，看不出是这里写错了（详见守则 §0.2 第 4 条）。
+- insert:
+    - id: qdash-neo-plugin-coc
+      name: '@cmnyhh/qdash-neo-plugin-coc'
+      config:
+        # 生图后端。**留着空就是"不画图"**，跑团功能完全不受影响。
+        #
+        # 注意：这里的 config 是**整块替换**，不是深合并 —— 所以 src/index.js
+        # 的 Config schema 必须给每个字段 `.default()`，否则填了 endpoint
+        # 忘记填 protocol 时会拿到 undefined 然后在运行期崩。
+        image:
+          endpoint: ''
+          apiKey: ''
+          protocol: 'openai'
