@@ -24,7 +24,15 @@ import { gradeSkill, rollD100, rollExpr } from './dice.js'
 import { checkSummary, exprSummary, healthTone, narrativeHint, sanityTone } from './format.js'
 import { ImageClient } from './image.js'
 import { Journal, isOoc } from './journal.js'
-import { ATTRS, SKILL_BASE, createSheet, derive, skillBase } from './sheet.js'
+import {
+  ATTRS,
+  SKILL_BASE,
+  createSheet,
+  derive,
+  isKnownSkill,
+  normalizeSkillName,
+  skillBase,
+} from './sheet.js'
 import { CocStore, whoKey } from './store.js'
 
 export const name = '@cmnyhh/qdash-neo-plugin-coc'
@@ -85,13 +93,23 @@ function toBool(v, dflt = false) {
   return dflt
 }
 
-/** 从角色卡里取技能值：加过点用加过的，否则走基础值（闪避/母语依赖属性） */
+/**
+ * 从角色卡里取技能值：加过点用加过的，否则走基础值。
+ *
+ * **两种写法都查**：`sheet.skills` 里存的可能是玩家当初写的别名
+ * （「格斗」），而这次判定用的是规范名（「斗殴」）—— 只查一边会
+ * 让加过的点凭空消失，退回基础值，看起来像"这人没练过"。
+ */
 function skillOf(sheet, rawName) {
-  const key = String(rawName ?? '').trim()
-  if (!key) return 0
-  const trained = sheet?.skills?.[key]
-  if (Number.isFinite(trained)) return Math.max(0, Math.trunc(trained))
-  return skillBase(key, sheet?.attrs ?? {})
+  const raw = String(rawName ?? '').trim()
+  if (!raw) return 0
+
+  const norm = normalizeSkillName(raw)
+  for (const k of [norm, raw]) {
+    const v = sheet?.skills?.[k]
+    if (Number.isFinite(v)) return Math.max(0, Math.trunc(v))
+  }
+  return skillBase(raw, sheet?.attrs ?? {})
 }
 
 export function apply(ctx, config = {}) {
@@ -411,7 +429,15 @@ export function apply(ctx, config = {}) {
         if (!conf.get().enabled) return { ok: false, reason: '跑团插件在控制台里关着' }
         const chatKey = String(exec?.chatKey ?? '')
         const who = resolveWho(chatKey, args?.who)
-        const skill = String(args?.skill ?? '').trim() || '检定'
+        const skillRaw = String(args?.skill ?? '').trim()
+        const skill = skillRaw || '检定'
+        /**
+         * **只对"传了名字但表里没有"的情况报警。**
+         *
+         * 默认的「检定」是占位名，不该被当成未知技能 —— 那会让
+         * 每次不传 skill 的调用都带上一条没用警告。
+         */
+        const unknownSkill = Boolean(skillRaw) && !isKnownSkill(skillRaw)
 
         const sheet = who ? store.getSheet(chatKey, who) : null
         const explicit = toNum(args?.value, Number.NaN)
@@ -460,6 +486,12 @@ export function apply(ctx, config = {}) {
             ...(noSheet
               ? { noSheet: true, sheetHint: `${who || '当前发言人'} 还没建卡，按基础值算的（闪避、母语会偏低，因为没属性）` }
               : {}),
+            ...(unknownSkill
+              ? {
+                  unknownSkill: true,
+                  skillHint: `「${skillRaw}」不是规则书技能名，按 0 算的。换成侦查 / 聆听 / 图书馆使用这类标准名，或者直接传 value。`,
+                }
+              : {}),
           }
         }
 
@@ -475,6 +507,12 @@ export function apply(ctx, config = {}) {
           ...extra,
           ...(noSheet
             ? { noSheet: true, sheetHint: `${who || '当前发言人'} 还没建卡，按基础值算的（闪避、母语会偏低，因为没属性）` }
+            : {}),
+          ...(unknownSkill
+            ? {
+                unknownSkill: true,
+                skillHint: `「${skillRaw}」不是规则书技能名，按 0 算的。换成侦查 / 聆听 / 图书馆使用这类标准名，或者直接传 value。`,
+              }
             : {}),
         }
       },
@@ -641,9 +679,17 @@ export function apply(ctx, config = {}) {
             next.mp = Math.min(next.mp ?? d.mp, d.mp)
             next.san = Math.min(next.san ?? d.san, d.san)
           } else {
+            /**
+             * **技能名存规范名。**
+             *
+             * 玩家说「我把点数加到格斗上」，如果原样存「格斗」，
+             * 之后按「斗殴」查就查不到 —— 加点凭空消失。
+             * 统一成规则书的写法，别名由 `skillBase` 兜底。
+             */
+            const skillKey = normalizeSkillName(field) || field
             next.skills = {
               ...(sheet.skills ?? {}),
-              [field]: Math.max(0, Math.min(999, Math.trunc(toNum(raw, 0)))),
+              [skillKey]: Math.max(0, Math.min(999, Math.trunc(toNum(raw, 0)))),
             }
           }
 

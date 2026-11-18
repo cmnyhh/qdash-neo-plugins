@@ -17,6 +17,7 @@ import {
   applyAge,
   damageBonus,
   derive,
+  isKnownSkill,
   moveRate,
   parsePointBuy,
   rollAttr,
@@ -309,6 +310,43 @@ test('建卡：掷出高分一次就过', () => {
   const s = createSheet({ rng: () => 0.99 })
   assert.match(s.method, /^掷骰（总和 720）$/)
   assert.equal(s.attrs.str, 90)
+})
+
+/* ---------------- 技能名归一化 ---------------- */
+
+test('技能：常见别名能对上规范名', () => {
+  assert.equal(skillBase('侦察'), 25, '侦察 → 侦查')
+  assert.equal(skillBase('图书馆'), 20, '图书馆 → 图书馆使用')
+  assert.equal(skillBase('格斗'), 25, '格斗 → 斗殴')
+  assert.equal(skillBase('射击'), 20, '射击 → 手枪')
+  assert.equal(skillBase('心理分析'), 10)
+  assert.equal(skillBase('快速交谈'), 5)
+})
+
+test('技能：带括号的写法能剥出主干', () => {
+  assert.equal(skillBase('格斗(斗殴)'), 25)
+  assert.equal(skillBase('射击（手枪）'), 20)
+  assert.equal(skillBase(' 侦查 '), 25, '前后空格不影响')
+})
+
+test('技能：扩充后的规则书条目有基础值', () => {
+  assert.equal(skillBase('魅惑'), 15)
+  assert.equal(skillBase('步枪'), 25)
+  assert.equal(skillBase('电子学'), 1)
+  assert.equal(skillBase('骑术'), 5)
+  assert.equal(skillBase('操作重型机械'), 1)
+})
+
+test('技能：未知名字返回 0，但能区别于"基础就是 0"的技能', () => {
+  assert.equal(skillBase('运动'), 0)
+  assert.equal(isKnownSkill('运动'), false, '规则书里没有这个')
+
+  assert.equal(skillBase('信用评级'), 0, '它基础确实 0')
+  assert.equal(isKnownSkill('信用评级'), true, '**但它是个真技能，不该被当成写错了**')
+
+  assert.equal(isKnownSkill('侦察'), true, '别名也算认识')
+  assert.equal(isKnownSkill('闪避'), true, '闪避不在静态表里，但有效')
+  assert.equal(isKnownSkill('母语'), true)
 })
 
 test('建卡：属性全落在规则书范围内', () => {

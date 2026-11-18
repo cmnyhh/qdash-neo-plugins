@@ -171,16 +171,27 @@ export const SKILL_BASE = {
   人类学: 1,
   估价: 5,
   考古学: 1,
-  取悦: 15,
+  /** 技艺/手艺：规则书是"任一"，取最低档 */
+  技艺: 5,
+  魅惑: 15,
   攀爬: 20,
+  /** 信用评级基础是 0，只能用职业点加 —— 这是规则，不是遗漏 */
   信用评级: 0,
   克苏鲁神话: 0,
   乔装: 5,
   汽车驾驶: 20,
   电气维修: 10,
+  电子学: 1,
   话术: 5,
   斗殴: 25,
+  刀剑: 20,
+  斧: 15,
+  矛: 20,
+  鞭: 5,
   手枪: 20,
+  步枪: 25,
+  冲锋枪: 15,
+  弓: 15,
   急救: 30,
   历史: 5,
   恐吓: 15,
@@ -195,9 +206,11 @@ export const SKILL_BASE = {
   博物学: 10,
   导航: 10,
   神秘学: 5,
+  操作重型机械: 1,
   说服: 10,
   精神分析: 1,
   心理学: 10,
+  骑术: 5,
   科学: 1,
   妙手: 10,
   侦查: 25,
@@ -206,6 +219,65 @@ export const SKILL_BASE = {
   游泳: 20,
   投掷: 20,
   追踪: 10,
+}
+
+/**
+ * **常见别名 → 规范名。**
+ *
+ * 这是"为什么判定出来是 0"的主因：模型写「侦察」而表里是「侦查」，
+ * 写「格斗」而表里是「斗殴」—— 差一个字就落到 `?? 0` 那一支，
+ * 而 0 技能掷 d100 几乎必失败，看起来像"这人不擅长这个"。
+ *
+ * `格斗(斗殴)` / `射击(手枪)` 这类带括号的写法则由 `normalizeSkillName` 处理。
+ */
+const SKILL_ALIASES = {
+  侦察: '侦查',
+  观察: '侦查',
+  搜索: '侦查',
+  察觉: '侦查',
+  图书馆: '图书馆使用',
+  查资料: '图书馆使用',
+  格斗: '斗殴',
+  拳击: '斗殴',
+  武术: '斗殴',
+  射击: '手枪',
+  枪械: '手枪',
+  倾听: '聆听',
+  听: '聆听',
+  心理分析: '心理学',
+  读心: '心理学',
+  快速交谈: '话术',
+  说服力: '说服',
+  驾驶: '汽车驾驶',
+  开车: '汽车驾驶',
+  机械: '机械维修',
+  电工: '电气维修',
+  电脑: '电子学',
+  计算机: '电子学',
+  医疗: '医学',
+  治疗: '医学',
+  急救术: '急救',
+  攀岩: '攀爬',
+  藏匿: '潜行',
+  躲藏: '潜行',
+  跟踪: '追踪',
+  骑: '骑术',
+  游泳术: '游泳',
+}
+
+/**
+ * 技能名归一化：去括号内容、去空格标点。
+ *
+ * `格斗(斗殴)` → `格斗`、`射击（手枪）` → `射击`、` 图书馆使用 ` → `图书馆使用`
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function normalizeSkillName(raw) {
+  return String(raw ?? '')
+    .trim()
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/[\s·・、,，]/g, '')
 }
 
 /**
@@ -218,10 +290,40 @@ export const SKILL_BASE = {
  * @returns {number}
  */
 export function skillBase(name, attrs = {}) {
-  const key = String(name ?? '').trim()
+  const key = normalizeSkillName(name)
+  if (!key) return 0
+
+  // 这两项依赖属性，不能写进静态表
   if (key === '闪避') return Math.floor((Number(attrs.dex) || 0) / 2)
   if (key === '母语') return Math.trunc(Number(attrs.edu) || 0)
-  return SKILL_BASE[key] ?? 0
+
+  /**
+   * **先查规范名，再查别名。**
+   *
+   * 顺序不能反：`skillsOf` 生成卡面时用的是规范名，
+   * 如果有人给 `SKILL_ALIASES` 加了和 `SKILL_BASE` 重名的键，
+   * 反过来查会让规范名被别名覆盖。
+   */
+  if (SKILL_BASE[key] != null) return SKILL_BASE[key]
+  const canonical = SKILL_ALIASES[key]
+  return canonical != null ? (SKILL_BASE[canonical] ?? 0) : 0
+}
+
+/**
+ * 这个技能名是不是规则书里有的（含别名）。
+ *
+ * 用来区分两种情况：
+ *   - 技能存在但基础值就是 0（信用评级、克苏鲁神话）→ 正常
+ *   - 技能名压根不存在（"运动"、"感知"）→ 该提醒模型换个说法
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isKnownSkill(name) {
+  const key = normalizeSkillName(name)
+  if (!key) return false
+  if (key === '闪避' || key === '母语') return true
+  return SKILL_BASE[key] != null || SKILL_ALIASES[key] != null
 }
 
 /* ---------------- 生成：掷骰 ---------------- */
