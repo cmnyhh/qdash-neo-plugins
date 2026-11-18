@@ -10,9 +10,15 @@ import { test } from 'node:test'
 
 import {
   ATTRS,
+  MIN_ROLL_TOTAL,
+  POINT_MAX,
+  POINT_MIN,
+  POINT_TOTAL,
+  applyAge,
   damageBonus,
   derive,
   moveRate,
+  parsePointBuy,
   rollAttr,
   createSheet,
   skillBase,
@@ -174,6 +180,135 @@ test('建卡：当前值与上限一致，名字会截断，年龄会夹住', ()
   assert.equal(s.san, s.maxSan)
   assert.equal(s.name.length, 40, '名字截到 40 字')
   assert.equal(s.age, 15, '年龄下限 15')
+})
+
+/* ---------------- 点数分配 ---------------- */
+
+test('点数分配：总和正好 480 才通过', () => {
+  const ok = parsePointBuy('str=60,con=60,siz=60,dex=60,app=60,int=60,pow=60,edu=60')
+  assert.equal(ok.ok, true)
+  assert.equal(ok.attrs.edu, 60)
+})
+
+test('点数分配：总和不对时报差额', () => {
+  const low = parsePointBuy('str=50,con=50,siz=50,dex=50,app=50,int=50,pow=50,edu=50')
+  assert.equal(low.ok, false)
+  assert.match(low.error, /总和是 400/)
+  assert.match(low.error, /还差 80/)
+
+  const high = parsePointBuy('str=70,con=70,siz=70,dex=70,app=70,int=70,pow=70,edu=70')
+  assert.equal(high.ok, false)
+  assert.match(high.error, /多了 80/)
+})
+
+test('点数分配：单项必须在 40–90', () => {
+  const r1 = parsePointBuy('str=30,con=70,siz=70,dex=70,app=70,int=70,pow=70,edu=70')
+  assert.equal(r1.ok, false)
+  assert.match(r1.error, /str 要在 40–90/)
+
+  const r2 = parsePointBuy('str=95,con=65,siz=70,dex=70,app=70,int=70,pow=70,edu=70')
+  assert.equal(r2.ok, false)
+  assert.match(r2.error, /str 要在 40–90/)
+})
+
+test('点数分配：缺项、重复、写错都要报出来', () => {
+  assert.match(parsePointBuy('str=60').error, /还差/)
+  assert.match(parsePointBuy('str=60,str=60,con=60,siz=60,dex=60,app=60,int=60,pow=60,edu=60').error, /写了两遍/)
+  assert.match(parsePointBuy('力量=60').error, /没有这个属性|看不懂/)
+  assert.equal(parsePointBuy('').ok, false)
+})
+
+test('点数分配：分隔符宽容（中文逗号、空格、冒号都行）', () => {
+  const r = parsePointBuy('str:60，con:60 siz:60;dex:60,app:60,int:60,pow:60,edu:60')
+  assert.equal(r.ok, true, r.error)
+  assert.equal(r.attrs.str, 60)
+})
+
+/* ---------------- 年龄修正 ---------------- */
+
+const BASE_ATTRS = { str: 60, con: 60, siz: 60, dex: 60, app: 60, int: 60, pow: 60, edu: 60 }
+
+test('年龄：20–39 不加不减', () => {
+  const r = applyAge(BASE_ATTRS, 30, () => 0.5)
+  assert.deepEqual(r.attrs, BASE_ATTRS)
+  assert.equal(r.luckTwice, false)
+  assert.equal(r.note, '')
+})
+
+test('年龄：未满二十，力体教各 −5，幸运掷两次', () => {
+  const r = applyAge(BASE_ATTRS, 18, () => 0.5)
+  assert.equal(r.attrs.str, 55)
+  assert.equal(r.attrs.siz, 55)
+  assert.equal(r.attrs.edu, 55)
+  assert.equal(r.attrs.int, 60, '智力不受影响')
+  assert.equal(r.luckTwice, true)
+})
+
+test('年龄：40s 减 5，50s 减 10，体型和意志不受影响', () => {
+  const a40 = applyAge(BASE_ATTRS, 45, () => 0.5) // 0.5 → d100=51 < 60，增强失败
+  assert.equal(a40.attrs.str, 55)
+  assert.equal(a40.attrs.con, 55)
+  assert.equal(a40.attrs.dex, 55)
+  assert.equal(a40.attrs.app, 55)
+  assert.equal(a40.attrs.siz, 60, '体型不随年龄变')
+  assert.equal(a40.attrs.pow, 60, '意志不随年龄变')
+
+  const a50 = applyAge(BASE_ATTRS, 55, () => 0.5)
+  assert.equal(a50.attrs.str, 50, '50s 是两档，减 10')
+})
+
+test('年龄：教育增强掷过当前 EDU 才加 1d10', () => {
+  // 0.99 → d100=100 > 60，成功；d10 也取 10
+  const pass = applyAge(BASE_ATTRS, 45, () => 0.99)
+  assert.equal(pass.attrs.edu, 70, '60 + 10')
+  assert.match(pass.note, /教育增强 \+10/)
+
+  // 0.0 → d100=1，没过
+  const fail = applyAge(BASE_ATTRS, 45, () => 0)
+  assert.equal(fail.attrs.edu, 60)
+  assert.match(fail.note, /教育增强 1 次都没过/)
+})
+
+test('年龄：教育增强用当前 EDU 判定，越加越难', () => {
+  // 50s 两档：第一次 100>60 成功 → EDU=70；第二次 100>70 也成功 → 80
+  const r = applyAge(BASE_ATTRS, 55, () => 0.99)
+  assert.equal(r.attrs.edu, 80, '两次各 +10')
+})
+
+/* ---------------- 建卡：两种模式 ---------------- */
+
+test('建卡：points 模式按玩家分配，不做随机', () => {
+  const s = createSheet({
+    name: '测试员',
+    age: 30,
+    mode: 'points',
+    values: 'str=70,con=50,siz=60,dex=60,app=50,int=70,pow=60,edu=60',
+  })
+  assert.notEqual(s.ok, false)
+  assert.equal(s.attrs.str, 70)
+  assert.equal(s.attrs.con, 50)
+  assert.match(s.method, /点数分配/)
+  assert.equal(s.ageNote, '', '30 岁无修正')
+})
+
+test('建卡：points 模式校验失败返回 ok:false，不偷偷退回掷骰', () => {
+  const s = createSheet({ mode: 'points', values: 'str=50' })
+  assert.equal(s.ok, false)
+  assert.match(s.error, /还差/)
+  assert.equal(s.attrs, undefined, '**失败时不能有任何属性**，否则调用方以为建成了')
+})
+
+test('建卡：掷骰低于 420 会重掷，且如实记录次数', () => {
+  // 0.0 → 每项都最低（15×6 + 40×2 = 170），永远到不了 420
+  const s = createSheet({ rng: () => 0 })
+  assert.match(s.method, /5 次都没到 420/, '不能假装达标')
+  assert.equal(s.rawAttrs.str, 15)
+})
+
+test('建卡：掷出高分一次就过', () => {
+  const s = createSheet({ rng: () => 0.99 })
+  assert.match(s.method, /^掷骰（总和 720）$/)
+  assert.equal(s.attrs.str, 90)
 })
 
 test('建卡：属性全落在规则书范围内', () => {

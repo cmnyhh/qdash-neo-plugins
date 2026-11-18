@@ -24,7 +24,7 @@ import { gradeSkill, rollD100, rollExpr } from './dice.js'
 import { checkSummary, exprSummary, healthTone, narrativeHint, sanityTone } from './format.js'
 import { ImageClient } from './image.js'
 import { Journal } from './journal.js'
-import { createSheet, derive, skillBase } from './sheet.js'
+import { ATTRS, createSheet, derive, skillBase } from './sheet.js'
 import { CocStore, whoKey } from './store.js'
 
 export const name = '@cmnyhh/qdash-neo-plugin-coc'
@@ -468,7 +468,11 @@ export function apply(ctx, config = {}) {
       params: {
         act: 'create / get / set / hp / san',
         who: '这张卡属于谁（昵称或 QQ 号），不填用本会话最后的发送者',
-        name: 'act=create 时给角色起个名字（不填用 who）',
+        name: 'act=create 时给角色起个名字，把职业也揉进去（如「退役军医 霍华德」）',
+        mode: "act=create 的生成方式：roll（默认，掷骰）或 points（玩家自己分配 480 点）",
+        values:
+          'act=create mode=points 时的分配方案，如 str=70,con=60,siz=65,dex=55,app=50,int=70,pow=60,edu=75（总和必须正好 480，每项 40–90）',
+        age: 'act=create 时的年龄，影响属性修正与移动力，默认 25',
         field: 'act=set 时改哪一项：属性名（str/con/…）或技能名',
         value: 'act=set/hp/san 时的数值；hp/san 可传负数表示扣',
       },
@@ -481,7 +485,27 @@ export function apply(ctx, config = {}) {
         if (!who) return { ok: false, reason: '不知道这张卡属于谁 —— 请传 who（昵称或 QQ 号）' }
 
         if (act === 'create') {
-          const sheet = createSheet({ name: String(args?.name ?? who).trim() || who })
+          const sheet = createSheet({
+            name: String(args?.name ?? who).trim() || who,
+            age: toNum(args?.age, 25),
+            mode: String(args?.mode ?? 'roll').trim().toLowerCase(),
+            values: String(args?.values ?? ''),
+          })
+
+          /**
+           * **点数分配校验失败要原样退回去，不能悄悄换成掷骰。**
+           *
+           * 否则玩家以为自己按 480 分配成功了，实际拿到一组随机数 ——
+           * 而他没法从结果里看出来（都是"看起来合理"的属性）。
+           */
+          if (sheet?.ok === false) {
+            return {
+              ok: false,
+              reason: sheet.error,
+              hint: '让玩家重报一组，或者干脆改用掷骰（不传 mode）',
+            }
+          }
+
           store.setSheet(chatKey, who, sheet)
           if (journal) journal.append(chatKey, { kind: 'scene', text: `${who} 建卡：${sheet.name}` })
 
@@ -1071,6 +1095,12 @@ export function apply(ctx, config = {}) {
 （如「退役军医 霍华德」「跑码头的小混混 阿七」）。
 **不要替他们编好几个人再宣布** —— 那是你的角色，不是他们的。
 
+车卡有两种方式，**默认掷骰，玩家想控制就让他分配**：
+- **掷骰**（不传 mode）：总和低于 420 会自动重掷，年龄会带来修正
+- **分配**（mode=points）：八项总和 **480**、每项 **40–90**。
+  让玩家报数字，格式 \`str=70,con=60,...\`。**总数不对工具会退回**，
+  照它给的差额让玩家改，别自己凑数。
+
 **③ 开团**：卡都建完，才调 \`qq_coc_scene(act=new)\`，模式和地点一起定下来。
 
 **④ 开场**：一句话说清「他们已经在哪、正面对着什么」。
@@ -1433,6 +1463,10 @@ export function apply(ctx, config = {}) {
       occupationalPoints: s.occupationalPoints,
       interestPoints: s.interestPoints,
       image: s.image || '',
+      /** 这张卡是掷出来的还是分配出来的，以及年龄改了什么 */
+      method: s.method || '',
+      ageNote: s.ageNote || '',
+      total: ATTRS.reduce((sum, k) => sum + (Number(a[k]) || 0), 0),
     }
   }
 }
