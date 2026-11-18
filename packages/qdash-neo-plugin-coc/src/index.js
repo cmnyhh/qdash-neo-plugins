@@ -589,6 +589,20 @@ export function apply(ctx, config = {}) {
           journal?.useSession(chatKey, sessionId)
           journal?.append(chatKey, { kind: 'scene', title: scene.title, location: scene.location, text: `开团（${mode}）` })
 
+          /**
+           * **开团期间免频率拦截。**
+           *
+           * 跑团时玩家的每一句都该有回应，而配额（`groupReplyQuota`）和
+           * `replyChance`（默认 0.95，也就是每 20 句丢 1 句）是防刷屏用的 ——
+           * 它们会把一段连续对话切成碎片，表现就是"我说了它没理我"。
+           *
+           * **只关频率，不关资格**：白名单、群开关、是否点名照旧。
+           * 收场时（`act=close`）会清掉；万一忘了，主框架有 4 小时 TTL 兜底。
+           */
+          if (typeof neo.gateBypassApi?.set === 'function') {
+            neo.gateBypassApi.set(chatKey, { reason: `跑团：${scene.title || '未命名'}` })
+          }
+
           const drawing =
             conf.get().autoSceneArt !== false && scene.location
               ? drawInBackground(
@@ -662,6 +676,11 @@ export function apply(ctx, config = {}) {
           // 先停记录，再清 sessionId —— 顺序反了会把"收场"本身写进战报
           journal?.endSession(chatKey)
           store.setScene(chatKey, { sessionId: '' })
+
+          // 恢复常态的频率拦截：团散了就不该再无限制地回
+          if (typeof neo.gateBypassApi?.clear === 'function') {
+            neo.gateBypassApi.clear(chatKey)
+          }
 
           return {
             ok: Boolean(chronicle),

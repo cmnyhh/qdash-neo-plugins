@@ -26,6 +26,7 @@
 | `storage.forFeature()` | ✅ | **KV only**，不支持建表 |
 | `storage.dir()` | ✅ | `<DSH_HOME>/qdash-plugins/<name>/` |
 | `judgeApi.registerProvider()` | ✅ | 判定链的插件段 |
+| `gateBypassApi.set/clear/has/list` | ✅ | **会话级免频率拦截**。只关配额与 `ratePerMinute`；白名单、群开关、是否点名**不放开** |
 | `voice.send()` | ✅ | 发语音（路径、体积、限流、落库全在内核） |
 | `outboxApi.forPlugin(name).sendText()` | ✅ | 走内核队列，来源标记不可伪造 |
 | `outboxApi.forPlugin(name).sendSegments()` | ✅ | 同上（图片 / 语音 / 表情） |
@@ -731,8 +732,46 @@ if (!ctx.qdashNeo.capabilities['console-static']) {
 拿到 `false` 就走降级路径。
 
 当前清单：`console-tab` `tools` `settings` `storage` `outbox` `events`
-`voice-send` `voice-hook` `judge-provider` 为 `true`；
+`voice-send` `voice-hook` `judge-provider` `gate-bypass` 为 `true`；
 `console-static` `fetch` 为 `false`。
+
+#### 会话级免频率拦截（`gate-bypass`）
+
+跑团、连麦、连续问答这类场景里，对方的每一句都该有回应 —— 而
+`policy.groupReplyQuota`（默认 10 分钟 3 次）与 `policy.replyChance`
+（默认 0.95，**也就是每 20 句静默丢 1 句**）是防刷屏用的，会把一段
+连续对话切成碎片，表现就是"我说了它没理我"。
+
+```js
+// 开始：声明这个会话别按频率拦
+ctx.qdashNeo.gateBypassApi.set(chatKey, {
+  reason: '跑团：谁在敲墙',
+  ttlMs: 4 * 3600_000,   // 默认就是 4 小时，最小 10 分钟
+})
+
+// 结束：**必须调**，否则只能等 TTL 自然过期
+ctx.qdashNeo.gateBypassApi.clear(chatKey)
+
+// 排查
+ctx.qdashNeo.gateBypassApi.list()   // [{ chatKey, reason, until }]
+```
+
+**它只关两件事**：`allowReply`（配额）与 `ratePerMinute`（限流）。
+
+**这三件事一律不动**：
+
+| 闸门 | 为什么不放开 |
+|---|---|
+| 群开关 / 群白名单 | 那是"这个群能不能跟它说话" |
+| 私聊白名单 | 同上 |
+| `mention` 档的点名要求 | 放开等于对全群无条件响应 |
+
+> 所以它不是"插件能改消息链路"的后门 —— 只是把两个**频率类**参数按会话临时关掉，
+> 与"允许插件阻断消息"是两回事。
+
+**为什么带 TTL**：插件可能忘记 `clear`（进程被杀、插件卸载、代码抛错）。
+没有 TTL 的话，一次忘收场的跑团会让那个群**永久**不受配额约束，
+而这件事在控制台里完全看不出来。
 
 ---
 
