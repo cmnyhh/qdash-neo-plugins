@@ -41,6 +41,26 @@ function safeName(s) {
   return String(s ?? '').trim().replace(/[:%/\\]/g, '-').slice(0, 48)
 }
 
+/**
+ * **整条消息被一对圆括号包住 = 桌外话（OOC）。**
+ *
+ * 桌上约定：`（等等，门不是锁着的吗）` 是玩家在问 KP 或互相商量，
+ * **不是角色在行动**，不该推进剧情、也不该掷骰。
+ *
+ * **只认"整条被包住"**：`我去开门（你等我一下）` 里有真实动作，
+ * 不能被当成 OOC —— 那会让玩家白说一句话。
+ *
+ * 中英文括号都认，因为手机输入法两种都会打出来。
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isOoc(text) {
+  const s = String(text ?? '').trim()
+  if (!s) return false
+  return /^[（(][\s\S]*[）)]$/.test(s)
+}
+
 function hhmm(ts) {
   try {
     return new Date(ts).toLocaleTimeString('zh-CN', {
@@ -213,7 +233,16 @@ export class Journal {
   }
 
   #renderEntry(e) {
-    if (e.kind === 'in') return `**${e.who || '某人'}**：${e.text ?? ''}`
+    if (e.kind === 'in') {
+      /**
+       * **桌外话单独标出来。**
+       *
+       * 导出的是给人看的战报，`（你刚才说门没锁？）` 混在角色的行动里
+       * 会让整段读起来莫名其妙 —— 而它确实发生过，不该删掉。
+       */
+      const who = `**${e.who || '某人'}**`
+      return e.ooc ? `${who}（桌外）：${e.text ?? ''}` : `${who}：${e.text ?? ''}`
+    }
     if (e.kind === 'out') return `**KP**：${e.text ?? ''}`
     if (e.kind === 'check') {
       const bonus = e.bonus > 0 ? ` 奖励${e.bonus}` : e.bonus < 0 ? ` 惩罚${-e.bonus}` : ''

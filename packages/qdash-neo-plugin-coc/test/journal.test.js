@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { Journal } from '../src/journal.js'
+import { Journal, isOoc } from '../src/journal.js'
 
 function mk() {
   const dir = mkdtempSync(join(tmpdir(), 'coc-log-'))
@@ -165,6 +165,40 @@ test('记录：换场次后写新文件，旧文件还在', () => {
 
     assert.equal(s.journal.recent('g:1', 10).length, 1, 'recent 只看当前场次')
     assert.equal(s.journal.recent('g:1', 10)[0].text, '第二场')
+  } finally {
+    s.dispose()
+  }
+})
+
+/* ---------------- 桌外话（OOC） ---------------- */
+
+test('桌外话：整句被圆括号包住才算', () => {
+  assert.equal(isOoc('（等等，门不是锁着的吗）'), true)
+  assert.equal(isOoc('(你刚才说几点？)'), true, '英文括号也认')
+  assert.equal(isOoc('  （前后有空格）  '), true)
+})
+
+test('桌外话：混着真实动作的不算，否则玩家白说一句', () => {
+  assert.equal(isOoc('我去开门（你等我一下）'), false)
+  assert.equal(isOoc('（我）去开门'), false, '括号在开头但没包住整句')
+})
+
+test('桌外话：空串和普通句子不算', () => {
+  assert.equal(isOoc(''), false)
+  assert.equal(isOoc('普通的一句话'), false)
+  assert.equal(isOoc(null), false)
+})
+
+test('导出：桌外话单独标注，不和角色行动混在一起', () => {
+  const s = mk()
+  try {
+    s.journal.useSession('g:1', 's1')
+    s.journal.append('g:1', { kind: 'in', who: '草莓', text: '我去开门' })
+    s.journal.append('g:1', { kind: 'in', who: '草莓', text: '（门不是锁着的吗）', ooc: true })
+
+    const { markdown } = s.journal.exportMarkdown('g:1', { title: '测试' })
+    assert.match(markdown, /草莓\*\*：我去开门/)
+    assert.match(markdown, /草莓\*\*（桌外）：（门不是锁着的吗）/)
   } finally {
     s.dispose()
   }

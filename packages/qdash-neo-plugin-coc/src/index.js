@@ -23,7 +23,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { gradeSkill, rollD100, rollExpr } from './dice.js'
 import { checkSummary, exprSummary, healthTone, narrativeHint, sanityTone } from './format.js'
 import { ImageClient } from './image.js'
-import { Journal } from './journal.js'
+import { Journal, isOoc } from './journal.js'
 import { ATTRS, createSheet, derive, skillBase } from './sheet.js'
 import { CocStore, whoKey } from './store.js'
 
@@ -266,7 +266,18 @@ export function apply(ctx, config = {}) {
         const who = name && uid ? `${name}(${uid})` : name || uid
         if (who) lastSenders.set(chatKey, { who, ts: Date.now() })
 
-        journal?.append(chatKey, { kind: 'in', who: who || '', text: String(ev?.text ?? '').slice(0, 500) })
+        const text = String(ev?.text ?? '')
+        journal?.append(chatKey, {
+          kind: 'in',
+          who: who || '',
+          text: text.slice(0, 500),
+          /**
+           * **桌外话打标。** 整句被 `/` 或 `()` 包住的是玩家在问规则、
+           * 互相商量，不是角色行动 —— `recap` 和导出要靠这个标记区分，
+           * 否则模型会把「你刚才说门没锁？」当成一句台词接着往下写。
+           */
+          ...(isOoc(text) ? { ooc: true } : {}),
+        })
       })
 
       const offOut = neo.on('message/outbound', ev => {
@@ -1110,6 +1121,19 @@ export function apply(ctx, config = {}) {
 
 没建卡就掷骰是可以的（临时判定），但**正式开场前必须每人有一张卡**，
 否则 HP、SAN、技能值全是空的，后面全靠你现编。
+
+## 括号里的话是桌外话
+
+玩家用 **（）** 或 **()** 把**整句**包起来，是在跟你或其他人桌外交谈：
+问规则、互相商量、确认刚才发生了什么、开玩笑。
+
+**那不是角色在行动。**
+- 不要写进叙事，不要因为它推进剧情
+- **不要为它掷骰**
+- 就用平常语气回答，然后停下，等他们给出真正的动作
+
+**只有整句被括号包住才算。** \`我去开门（你等我一下）\` 里有真实动作，
+照常推进；括号那半句顺带回应一句就行。
 
 ## 掷骰：必须调工具
 
