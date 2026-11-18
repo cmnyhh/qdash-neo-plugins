@@ -24,7 +24,7 @@ import { gradeSkill, rollD100, rollExpr } from './dice.js'
 import { checkSummary, exprSummary, healthTone, narrativeHint, sanityTone } from './format.js'
 import { ImageClient } from './image.js'
 import { Journal, isOoc } from './journal.js'
-import { ATTRS, createSheet, derive, skillBase } from './sheet.js'
+import { ATTRS, SKILL_BASE, createSheet, derive, skillBase } from './sheet.js'
 import { CocStore, whoKey } from './store.js'
 
 export const name = '@cmnyhh/qdash-neo-plugin-coc'
@@ -416,6 +416,13 @@ export function apply(ctx, config = {}) {
         const sheet = who ? store.getSheet(chatKey, who) : null
         const explicit = toNum(args?.value, Number.NaN)
         const skillValue = Number.isFinite(explicit) ? explicit : skillOf(sheet, skill)
+        /**
+         * **没建卡时要提醒一句。**
+         *
+         * 大部分技能基础值是固定的（侦查 25、聆听 20），但 `闪避 = DEX/2`、
+         * `母语 = EDU` 依赖属性 —— 没卡时它们算出来是 0，看起来像"这个人闪避是零"。
+         */
+        const noSheet = !sheet && !Number.isFinite(explicit)
 
         const bonus = Math.max(-9, Math.min(9, Math.trunc(toNum(args?.bonus, 0))))
         const d = rollD100({ bonus })
@@ -450,6 +457,9 @@ export function apply(ctx, config = {}) {
             hint: h.text,
             note: '**别提任何数字，也不要用「困难成功」这类术语**，直接写成叙事',
             ...extra,
+            ...(noSheet
+              ? { noSheet: true, sheetHint: `${who || '当前发言人'} 还没建卡，按基础值算的（闪避、母语会偏低，因为没属性）` }
+              : {}),
           }
         }
 
@@ -463,6 +473,9 @@ export function apply(ctx, config = {}) {
           line: checkSummary({ name: skill, skill: skillValue, value: d.value, level, bonus }),
           note: '这行可以直接发出去，别改数字',
           ...extra,
+          ...(noSheet
+            ? { noSheet: true, sheetHint: `${who || '当前发言人'} 还没建卡，按基础值算的（闪避、母语会偏低，因为没属性）` }
+            : {}),
         }
       },
     }),
@@ -1459,6 +1472,36 @@ export function apply(ctx, config = {}) {
 
   /* ---------------- 内部工具 ---------------- */
 
+  /**
+   * 卡面上该显示的技能值。
+   *
+   * **基础值必须一起给。** `sheet.skills` 只存"加过点的"，
+   * 直接返回它，模型看到 `{}` 会以为没列出来的都是 0 —— 而侦查基础是 25，
+   * 一场团下来所有判定都会少算一截，还查不出来。
+   *
+   * 只铺**非零**的：零基础（克苏鲁神话、信用评级、外语）本来就没有，
+   * 列出来只是噪音。
+   *
+   * @param {object} sheet
+   * @returns {Record<string, number>}
+   */
+  function skillsOf(sheet) {
+    const attrs = sheet?.attrs ?? {}
+    const out = {}
+
+    for (const name of Object.keys(SKILL_BASE)) {
+      const v = skillBase(name, attrs)
+      if (v > 0) out[name] = v
+    }
+    // 这两项不在 SKILL_BASE 里，靠属性算（闪避 = DEX/2、母语 = EDU）
+    for (const name of ['闪避', '母语']) {
+      out[name] = skillBase(name, attrs)
+    }
+
+    // 加过点的覆盖基础值
+    return { ...out, ...(sheet?.skills ?? {}) }
+  }
+
   /** 卡面摘要：给模型看的那份，字段名用中文，别让它去猜 `siz` 是什么 */
   function summarizeSheet(s) {
     const a = s.attrs ?? {}
@@ -1483,7 +1526,8 @@ export function apply(ctx, config = {}) {
       mov: s.mov,
       db: s.db,
       build: s.build,
-      skills: s.skills ?? {},
+      /** 基础值 + 加点后的合并结果，**不是** `s.skills`（那只是加点部分） */
+      skills: skillsOf(s),
       occupationalPoints: s.occupationalPoints,
       interestPoints: s.interestPoints,
       image: s.image || '',
