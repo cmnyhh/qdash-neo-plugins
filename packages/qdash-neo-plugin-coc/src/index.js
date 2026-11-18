@@ -1253,7 +1253,28 @@ export function apply(ctx, config = {}) {
                 description: 'qq_coc_log act=recent 不传 n 时用这个',
               },
             ],
-            submit: { id: 'save', label: '保存' },
+            submit: {
+              id: 'save',
+              label: '保存',
+              /**
+               * **`run` 必须写在 `submit` 里。**
+               *
+               * 内核只从 `block.submit.run` 与 `type:'actions'` 块的 `run`
+               * 填充 actions 表 —— 写成顶层 `actions: { save }` **完全不会被读取**，
+               * 点保存会报「选项卡「coc」没有动作：save」，而插件侧看不出任何异常。
+               */
+              run: async ({ values } = {}) => {
+                const patch = {}
+                if (values && 'autoPortrait' in values) patch.autoPortrait = Boolean(values.autoPortrait)
+                if (values && 'autoSceneArt' in values) patch.autoSceneArt = Boolean(values.autoSceneArt)
+                if (values && 'recentLimit' in values) {
+                  patch.recentLimit = Math.max(1, Math.min(200, Math.trunc(toNum(values.recentLimit, 30))))
+                }
+                conf.set(patch)
+                renderTab()
+                return { ok: true, message: '已保存，立即生效' }
+              },
+            },
           },
           {
             /**
@@ -1311,7 +1332,37 @@ export function apply(ctx, config = {}) {
                 description: '留空用内置的 1920s cosmic horror 那套；想换画风就写自己的。',
               },
             ],
-            submit: { id: 'saveImage', label: '保存生图配置' },
+            submit: {
+              id: 'saveImage',
+              label: '保存生图配置',
+              /**
+               * **`ok` 恒为 true**：这是"保存配置"，不是"测试连通性"。
+               * 地址填错也保存成功 —— 用户可能想先填后调。
+               * 能不能连通会在下一次 `qq_coc_art` 的返回里体现。
+               */
+              run: async ({ values } = {}) => {
+                const patch = {}
+                for (const k of [
+                  'imageEndpoint',
+                  'imageApiKey',
+                  'imageProtocol',
+                  'imageModel',
+                  'imageSize',
+                  'imageStyle',
+                ]) {
+                  if (values && k in values) patch[k] = String(values[k] ?? '').trim()
+                }
+                conf.set(patch)
+                renderTab()
+
+                return {
+                  ok: true,
+                  message: images.ready
+                    ? '已保存，生图后端可用'
+                    : '已保存，但地址为空 —— 之后不会画图（其余功能不受影响）',
+                }
+              },
+            },
           },
           {
             type: 'actions',
@@ -1338,54 +1389,6 @@ export function apply(ctx, config = {}) {
             ],
           },
         ],
-        /**
-         * **`actions` 是 `registerTab` 的顶层字段**，不是 layout 里的块 ——
-         * 写成 `form.actions` 会被静默忽略，界面上一个按钮都不响应（守则 §0.2）。
-         */
-        actions: {
-          save: async ({ values } = {}) => {
-            const patch = {}
-            if (values && 'autoPortrait' in values) patch.autoPortrait = Boolean(values.autoPortrait)
-            if (values && 'autoSceneArt' in values) patch.autoSceneArt = Boolean(values.autoSceneArt)
-            if (values && 'recentLimit' in values) {
-              patch.recentLimit = Math.max(1, Math.min(200, Math.trunc(toNum(values.recentLimit, 30))))
-            }
-            conf.set(patch)
-            renderTab()
-            return { ok: true, message: '已保存，立即生效' }
-          },
-
-          /**
-           * 生图配置的保存。
-           *
-           * **`ok` 恒为 true**：这是"保存配置"，不是"测试连通性"。
-           * 地址填错也保存成功 —— 用户可能想先填后调。
-           * 能不能连通会在下一次 `qq_coc_art` 的返回里体现。
-           */
-          saveImage: async ({ values } = {}) => {
-            const patch = {}
-            for (const k of [
-              'imageEndpoint',
-              'imageApiKey',
-              'imageProtocol',
-              'imageModel',
-              'imageSize',
-              'imageStyle',
-            ]) {
-              if (values && k in values) patch[k] = String(values[k] ?? '').trim()
-            }
-            conf.set(patch)
-            renderTab()
-
-            const ready = images.ready
-            return {
-              ok: true,
-              message: ready
-                ? '已保存，生图后端可用'
-                : '已保存，但地址为空 —— 之后不会画图（其余功能不受影响）',
-            }
-          },
-        },
       })
     } catch (err) {
       log('warn', `qdash-neo-plugin-coc: 注册控制台选项卡失败 msg=${err?.message}`)

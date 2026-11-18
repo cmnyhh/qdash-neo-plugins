@@ -1021,24 +1021,42 @@ const dispose = ctx.qdashNeo.console.registerTab({
     { path: 'enabled', label: '开启', type: 'boolean', value: true },
     { path: 'maxChars', label: '字数上限', type: 'number', value: 200 },
   ],
-  submit: { id: 'save', label: '保存' },     // ← 有它才渲染输入控件
+  submit: {
+    id: 'save',
+    label: '保存',
+    /**
+     * **`run` 必须写在 `submit` 里。**
+     *
+     * 内核只从 `block.submit.run` 与 `type:'actions'` 块的 `run` 填充
+     * actions 表 —— **顶层那张 `actions: { save }` 一行都不会被读**。
+     */
+    run: async ({ values }) => {
+      conf.set(values)              // conf = settings.register(...)
+      return { ok: true, message: '已保存，立即生效' }
+    },
+  },
 }
 ```
 
 点保存时，内核把所有字段按 `path` 收成 `{ [path]: value }`，
 POST 到 `/api/tabs/<tabId>/actions/<submit.id>`，body 是 `{ values }`。
-插件自己处理：
-
-```js
-actions: {
-  save: async ({ values }) => {
-    conf.set(values)              // conf = settings.register(...)
-    return { ok: true, message: '已保存，立即生效' }
-  },
-}
-```
 
 **内核不解析 `values`**，只做透传和返回值包装。否则每加一个插件就要改一次内核的配置解析。
+
+> **这里踩过坑。** 早先这份文档教的是
+>
+> ```js
+> submit: { id: 'save', label: '保存' },
+> // 然后
+> actions: { save: async ({ values }) => { ... } }
+> ```
+>
+> 而内核从来只认 `submit.run`。表现是点保存报
+> 「选项卡「xxx」没有动作：save」，**插件侧看不出任何异常** ——
+> 它确实把函数传过来了，只是传错了地方。
+>
+> 还有个容易混淆的对称陷阱：**`type: 'actions'` 块里的 `run` 是有效的**
+> （那是独立按钮）。所以「表单保存」和「按钮点击」写法看起来一样，实则不是一处。
 
 **控件类型**（按 `type` 选；带 `options` 时优先渲染下拉）：
 

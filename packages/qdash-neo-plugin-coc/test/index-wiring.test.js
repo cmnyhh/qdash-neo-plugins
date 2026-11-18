@@ -77,7 +77,19 @@ test('装配：控制台选项卡走 renderTab + ctx.effect（快照要能刷新
   assert.match(code, /dispose\(\)|tabDispose\?\.\(\)/, '重注册前要 dispose 旧的')
 })
 
-test('装配：选项卡的 actions 是顶层字段，不是 layout 里的块', () => {
-  // `form.actions` 会被静默忽略，界面上一个按钮都没反应
-  assert.match(code, /actions: \{\s*save:/, 'submit 的处理函数要挂在顶层')
+test('装配：表单的 run 必须写在 submit 里', () => {
+  /**
+   * **内核只从 `block.submit.run` 填充 actions 表**，
+   * 顶层 `actions: { save }` 一行都不会被读。
+   *
+   * 写错的症状是点保存报「选项卡「coc」没有动作：save」，
+   * 而插件侧看不出任何异常 —— 函数确实传了，只是传错了地方。
+   * 这条断言就是防这个回潮。
+   */
+  // 窗口放宽到 800 字符：submit 里夹着大段注释，300 不够
+  assert.match(code, /submit: \{\s*id: 'save',[\s\S]{0,800}?run: async/, '保存按钮要带 run')
+  assert.match(code, /submit: \{\s*id: 'saveImage',[\s\S]{0,800}?run: async/, '生图保存也要带 run')
+
+  // 顶层那张表不会被读，出现就是错的
+  assert.doesNotMatch(code, /^\s{6,10}actions: \{\s*$/m, '不要写顶层 actions —— 内核不读它')
 })
