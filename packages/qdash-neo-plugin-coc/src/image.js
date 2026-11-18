@@ -159,6 +159,7 @@ export class ImageClient {
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`
 
     let body
+    const model = String(cfg.model ?? '').trim()
     if (protocol === 'sdapi') {
       body = {
         prompt,
@@ -167,6 +168,13 @@ export class ImageClient {
         height,
         steps: Math.max(1, Number(cfg.steps) || 24),
       }
+      /**
+       * **SD WebUI 没有 `model` 字段**，切模型走 `override_settings`。
+       *
+       * 值要写 checkpoints 目录里的完整文件名（如 `sd_xl_base_1.0.safetensors`），
+       * 只写 `sdxl` 认不出来。
+       */
+      if (model) body.override_settings = { sd_model_checkpoint: model }
     } else if (protocol === 'custom') {
       const tpl = cfg.bodyTemplate
       body =
@@ -181,7 +189,8 @@ export class ImageClient {
     } else {
       // openai 兼容
       body = {
-        model: String(cfg.model ?? 'dall-e-3'),
+        // 留空时退回 dall-e-3；自建服务通常要写自己的模型名
+        model: model || 'dall-e-3',
         prompt,
         n: 1,
         size: `${width}x${height}`,

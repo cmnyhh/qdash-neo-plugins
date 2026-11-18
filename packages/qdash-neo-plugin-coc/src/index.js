@@ -140,6 +140,14 @@ export function apply(ctx, config = {}) {
       imageEndpoint: '',
       imageApiKey: '',
       imageProtocol: 'openai',
+      /**
+       * 模型名。**留空表示"用服务端默认"**。
+       *
+       * 两种协议的语义不同：
+       *   - `openai`  → body.model（`dall-e-3` / `flux` / 自建服务的名字）
+       *   - `sdapi`   → `override_settings.sd_model_checkpoint`（**要写完整文件名**）
+       */
+      imageModel: '',
       imageSize: '512x512',
       imageStyle: '',
       imageNegative: '',
@@ -189,7 +197,13 @@ export function apply(ctx, config = {}) {
         size: pick('imageSize', '512x512'),
         stylePrefix: pick('imageStyle'),
         negativePrompt: pick('imageNegative'),
-        model: fallback.model ?? 'dall-e-3',
+        /**
+         * 模型名**不给默认值**：空串意味着"用服务端自己的默认"。
+         *
+         * 之前这里是 `fallback.model ?? 'dall-e-3'`，导致选 sdapi 时也会
+         * 带上 `dall-e-3` 当 checkpoint 名 —— SD 那边找不到这个文件，直接 500。
+         */
+        model: String(c?.imageModel ?? '').trim() || String(fallback.model ?? '').trim(),
         steps: fallback.steps ?? 24,
         timeoutMs: fallback.timeoutMs ?? 120000,
         resultPath: fallback.resultPath ?? 'image',
@@ -1270,6 +1284,13 @@ export function apply(ctx, config = {}) {
                 value: c.imageProtocol || 'openai',
               },
               {
+                path: 'imageModel',
+                label: '模型',
+                value: c.imageModel ?? '',
+                description:
+                  'openai 协议填模型名（dall-e-3 / flux / 自建服务的名字）；sdapi 填 checkpoint **完整文件名**（如 sd_xl_base_1.0.safetensors）。留空表示用服务端默认。',
+              },
+              {
                 path: 'imageApiKey',
                 label: 'API Key',
                 type: 'password',
@@ -1343,7 +1364,14 @@ export function apply(ctx, config = {}) {
            */
           saveImage: async ({ values } = {}) => {
             const patch = {}
-            for (const k of ['imageEndpoint', 'imageApiKey', 'imageProtocol', 'imageSize', 'imageStyle']) {
+            for (const k of [
+              'imageEndpoint',
+              'imageApiKey',
+              'imageProtocol',
+              'imageModel',
+              'imageSize',
+              'imageStyle',
+            ]) {
               if (values && k in values) patch[k] = String(values[k] ?? '').trim()
             }
             conf.set(patch)
